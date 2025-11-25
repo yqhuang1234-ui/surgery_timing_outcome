@@ -20,25 +20,6 @@ vars_spline <- c("age", "mortality_rsi")
 var_exporsure <- "hour"
 var_outcome <- "mort30"
 
-# model with 
-model_hour_linear <- glm(
-  mort30 ~
-    rcs(age,4) +                         # 
-    gender +
-    asa_status +
-    baseline_cancer +
-    baseline_cvd +
-    baseline_psych +
-    baseline_pulmonary +
-    baseline_charlson +
-    rcs(mortality_rsi,4) +               #
-    ccsMort30Rate +
-    hour +                        # linear for now
-    procedure,
-  family = binomial,
-  data   = data
-)
-
 # model with rcs(age, 4)
 model_hour_spline <- glm(
   mort30 ~
@@ -57,62 +38,6 @@ model_hour_spline <- glm(
   family = binomial,
   data   = data
 )
-
-# lrt _aic/bic comparison
-# Likelihood Ratio Test (nested: linear age vs spline age)
-anova(model_hour_linear, model_hour_spline, test = "LRT")
-
-# Information criteria
-AIC(model_hour_linear, model_hour_spline)
-BIC(model_hour_linear, model_hour_spline)
-
-model_core <- glm(
-  mort30 ~
-    rcs(age, 4) +
-    gender +
-    asa_status +
-    baseline_charlson +
-    rcs(mortality_rsi, 4) +
-    ccsMort30Rate +
-    rcs(hour, 4) +
-    procedure,
-  family = binomial,
-  data   = data
-)
-
-model_with_cancer <- update(
-  model_core,
-  . ~ . + baseline_cancer
-)
-anova(model_core, model_with_cancer, test = "LRT")
-
-model_with_cvd <- update(
-  model_core,
-  . ~ . + baseline_cvd
-)
-
-anova(model_core, model_with_cvd, test = "LRT")
-
-model_with_psych <- update(
-  model_core,
-  . ~ . + baseline_psych
-)
-
-anova(model_core, model_with_psych, test = "LRT")
-
-model_with_pulm <- update(
-  model_core,
-  . ~ . + baseline_pulmonary
-)
-
-anova(model_core, model_with_pulm, test = "LRT")
-
-summary(model_hour_spline)
-
-anova(model_hour_spline, test="LRT")
-
-library(rms)
-plot(Predict(model_hour_spline, hour ))
 
 # 1) Create a sequence of hours
 hour_seq <- seq(
@@ -155,86 +80,3 @@ ggplot(newdat, aes(x = hour, y = pred_prob)) +
     title = "Adjusted relationship between surgery time and 30-day mortality"
   ) +
   theme_minimal()
-
-#fit model with categorical 
-# Create binary hour category
-data$hour_bin <- ifelse(data$hour < 12, "early", "late")
-data$hour_bin <- factor(data$hour_bin, levels = c("early", "late"))
-model_hour_bin <- glm(
-  mort30 ~ 
-    rcs(age, 4) +
-    gender +
-    asa_status +
-    baseline_cancer +
-    baseline_cvd +
-    baseline_psych +
-    baseline_pulmonary +
-    baseline_charlson +
-    rcs(mortality_rsi, 4) +
-    ccsMort30Rate +
-    hour_bin +
-    procedure,
-  data   = data,
-  family = binomial
-)
-
-AIC(model_hour_linear, model_hour_spline, model_hour_bin)
-BIC(model_hour_linear, model_hour_spline, model_hour_bin)
-summary(model_hour_bin)
-anova(model_hour_bin, test="LRT")
-
-data$hour_quartile <- cut(
-  data$hour,
-  breaks = quantile(data$hour, probs = c(0, 0.25, 0.5, 0.75, 1),
-                    na.rm = TRUE),
-  include.lowest = TRUE,
-  labels = c("Q1", "Q2", "Q3", "Q4")
-)
-model_hour_quartile <- glm(
-  mort30 ~ 
-    rcs(age, 4) +
-    gender +
-    asa_status +
-    baseline_cancer +
-    baseline_cvd +
-    baseline_psych +
-    baseline_pulmonary +
-    baseline_charlson +
-    rcs(mortality_rsi, 4) +
-    ccsMort30Rate +
-    hour_quartile +
-    procedure,
-  data   = data,
-  family = binomial
-)
-AIC(model_hour_linear, model_hour_spline, model_hour_bin, model_hour_quartile)
-BIC(model_hour_linear, model_hour_spline, model_hour_bin, model_hour_quartile)
-anova(model_hour_quartile, test="LRT")
-
-
-data$hour_group <- cut(
-  data$hour,
-  breaks = c(7, 10, 13, 16, 19),
-  include.lowest = TRUE,
-  labels = c("7–10", "10–13", "13–16", "16–19")
-)
-model_hour_group <- glm(
-  mort30 ~ 
-    rcs(age, 4) +
-    gender +
-    asa_status +
-    baseline_cancer +
-    baseline_cvd +
-    baseline_psych +
-    baseline_pulmonary +
-    baseline_charlson +
-    rcs(mortality_rsi, 4) +
-    ccsMort30Rate +
-    hour_group +
-    procedure,
-  data   = data,
-  family = binomial
-)
-AIC(model_hour_linear, model_hour_spline, model_hour_bin, model_hour_quartile, model_hour_group)
-BIC(model_hour_linear, model_hour_spline, model_hour_bin, model_hour_quartile, model_hour_group)
-anova(model_hour_group, test="LRT")
