@@ -1,19 +1,10 @@
 ## ================================
 ## 0. Load needed packages and data
 ## ================================
+setwd("~/Dropbox/School/CU/fall 2025/BIOS 6618 adv biostatistical method/final project/surgery_timing_outcome")
 source("./code/0.0_setup_surgery-timing-outcome.R")
-install.packages(c("visdat"))
-library(visdat)
 head(data)
 colnames(data)
-data <- data %>%
-  # Convert binary variables to factors
-  mutate(across(all_of(vars_binary), ~ as.numeric(.))) %>%
-  # Convert categorical variables to factors
-  mutate(across(all_of(vars_categorical), ~ as.factor(.))) %>%
-  # convert continuous variables to numeric
-  mutate(across(all_of(vars_continuous), ~ as.numeric(.))
-  )
 ############################################################
 ## 3. Quick data overview & missingness
 ############################################################
@@ -38,9 +29,16 @@ for (outcome in vars_outcomes) {
   print(round(miss_by_outcome * 100, 4))
 }
 
+# count # of mort30=1 for missing cols
+for (v in miss_vars) {
+  mort30_count <- sum(data$mort30[data[[v]] %>% is.na()])
+  cat(paste0("Number of mort30=1 with missing ", v, ": ", mort30_count, "\n"))
+}
+
 ############################################################
 ## Pairwise plots for selected continuous variables
 ############################################################
+#plot correlation matrix for continuous variables
 plot_corr <- GGally::ggcorr(
   data %>% select(all_of(vars_continuous)),
   label = TRUE,
@@ -55,6 +53,7 @@ plot_corr <- GGally::ggcorr(
   ggtitle("Correlation matrix of continuous variables") +
   theme_minimal()
 print(plot_corr)
+############################################################
 # scatter plot mortality_rsi vs ccsMort30Rate 
 ggplot(data, aes(x = mortality_rsi, y = ccsMort30Rate)) +
   geom_point(alpha = 0.5) +
@@ -93,10 +92,10 @@ for (v in vars_continuous) {
 ## Base R EDA for categorical variables (subplots)
 ############################################################
 
-cat_vars <- vars_categorical + vars_binary
+cat_vars <- c(vars_categorical, vars_binary)
 print(length(cat_vars))
-par(mfrow = c(4, 3))
-for (v in cat_vars[1:12]) {
+par(mfrow = c(5, 4))
+for (v in cat_vars) {
   tab <- table(data[[v]])
   barplot(tab,
           main = paste("Barplot of", v),
@@ -354,6 +353,45 @@ ggplot(mort_cat_summary,
   theme(
     axis.text.x = element_text(angle = 45, hjust = 1)
   )
+
+# conduct chi square tests for categorical vars vs mort30 and save to table
+# save table with variable name, value of each category, difference, p-value, whether <0.05
+chi_square_results <- data.frame(
+  variable   = character(),
+  category   = character(),
+  mort_rate  = numeric(),
+  p_value    = numeric(),
+  sig_level  = character(),
+  stringsAsFactors = FALSE
+)
+for (v in cat_vars) {
+  tab <- table(data[[v]], data$mort30)
+  chi_test <- chisq.test(tab)
+  p_val <- chi_test$p.value
+  mort_rates <- prop.table(tab, 1)[, "1"]
+  
+  for (cat in rownames(tab)) {
+    chi_square_results <- rbind(
+      chi_square_results,
+      data.frame(
+        variable  = v,
+        category  = cat,
+        mort_rate = mort_rates[cat],
+        p_value   = p_val,
+        sig_level = ifelse(p_val < 0.05, "Yes", "No"),
+        stringsAsFactors = FALSE
+      )
+    )
+  }
+}
+# pivot the table showing category value as columns for better readability
+chi_square_results <- chi_square_results %>%
+  tidyr::pivot_wider(
+    names_from  = category,
+    values_from = mort_rate,
+    names_prefix = "mort_rate_"
+  )
+print(chi_square_results)
 
 plot_rsi_box_all <- function(data, cat_vars) {
   
