@@ -5,7 +5,7 @@
 setwd("~/Dropbox/School/CU/fall 2025/BIOS 6618 adv biostatistical method/final project/surgery_timing_outcome")
 source("./code/0.0_setup_surgery-timing-outcome.R")
 # load processed data
-file_name_asa_factor <- "./data/processed/2025-11-25_dropna_regroup-procedure_no-encode.rds"
+file_name_asa_factor <- "./data/processed/2025-11-27_dropna_regroup-procedure_no-encode.rds"
 data <- readRDS(file_name_asa_factor)
 str(data)
 # check missingness for data
@@ -16,115 +16,100 @@ names(data)
 #################################
 # build models
 #################################
+# set up
 vars_spline <- c("age", "mortality_rsi")
 var_exporsure <- "hour"
 var_outcome <- "mort30"
+dd <- datadist(data)
+options(datadist = "dd")
 
-# model with rcs(age, 4)
-model_hour_spline <- glm(
-  mort30 ~
-    rcs(age,4) +                         # 
-    gender +
-    asa_status +
-    baseline_cancer +
-    baseline_cvd +
-    baseline_psych +
-    baseline_pulmonary +
-    baseline_charlson +
-    rcs(mortality_rsi,4) +               #
-    ccsMort30Rate +
-    rcs(hour,4) +                        # linear for now
-    procedure,
-  family = binomial,
-  data   = data
+# automatically define other covariates
+other_covariates <- setdiff(
+  names(data),
+  c(var_outcome, var_exporsure, vars_spline)
 )
-#get aic and bic
-AIC(model_hour_spline)
-BIC(model_hour_spline)
+print(other_covariates)
+print(length(other_covariates))
 
-model_hour_spline_linear <- glm(
-  mort30 ~
-    age +                         # 
-    gender +
-    asa_status +
-    baseline_cancer +
-    baseline_cvd +
-    baseline_psych +
-    baseline_pulmonary +
-    baseline_charlson +
-    rcs(mortality_rsi,3) +               #
-    ccsMort30Rate +
-    hour +                        # linear for now
-    procedure,
-  family = binomial,
-  data   = data
-)
-summary(model_hour_spline_linear)
-AIC(model_hour_spline_linear)
-BIC(model_hour_spline_linear)
-summary(model_hour_spline)
-anova(model_hour_spline, test="LRT")
-model_hour_spline_complication <- glm(
-  complication ~
-    rcs(age,4) +                         # 
-    gender +
-    asa_status +
-    baseline_cancer +
-    baseline_cvd +
-    baseline_psych +
-    baseline_pulmonary +
-    baseline_charlson +
-    rcs(mortality_rsi,4) +               #
-    ccsMort30Rate +
-    rcs(hour,4) +                        # linear for now
-    procedure,
-  family = binomial,
-  data   = data
+# construct base rhs
+base_rhs <- paste(
+  "rcs(age, K) + rcs(mortality_rsi, K) + rcs(hour, K)",
+  if (length(other_covariates) > 0)
+    paste("+", paste(other_covariates, collapse = " + "))
+  else ""
 )
 
-summary(model_hour_spline_complication)
-anova(model_hour_spline_complication, test="LRT")
+# fit models with different K
+fit_k <- list()
+AIC_k <- numeric()
 
-# count by hour
+for (K in c(0, 3, 4)) {
+  if (K == 0) {
+    # k = 0 = linear model: no rcs(), just linear terms
+    f <- lrm(
+      as.formula(
+        paste("mort30 ~ age + mortality_rsi + hour",
+              if (length(other_covariates) > 0)
+                paste("+", paste(other_covariates, collapse = " + "))
+              else "")
+      ),
+      data = data
+    )
+  } else {
+    f <- lrm(
+      as.formula(paste("mort30 ~", gsub("K", K, base_rhs))),
+      data = data
+    )
+  }
+  fit_k[[as.character(K)]] <- f
+  AIC_k[as.character(K)] <- AIC(f)
+}
 
-# 1) Create a sequence of hours
-hour_seq <- seq(
-  from = min(data$hour, na.rm = TRUE),
-  to   = max(data$hour, na.rm = TRUE),
-  length.out = 100
+AIC_k
+# choose the k with lowest AIC
+best_k <- as.numeric(names(which.min(AIC_k)))
+print(paste("Best K:", best_k))
+best_model <- fit_k[[as.character(best_k)]]
+
+# within best k, check which variables are truely nonlinear
+#if nonlinear has small p keep spline, if p large change to linear
+anova(best_model)
+
+# finalize model formula
+fit_final_basic <- lrm(
+  as.formula(
+    paste("mort30 ~ age + rcs(mortality_rsi,3) + hour",
+          if (length(other_covariates) > 0)
+            paste("+", paste(other_covariates, collapse = " + "))
+          else "")
+  ),
+  data = data
+)
+anova(fit_final_basic)
+
+#check AIC for all models
+c(
+  AIC_k,
+  final=AIC(fit_final_basic)
 )
 
-# 2) Set other covariates to typical values (adjust as needed)
-newdat <- data.frame(
-  hour              = hour_seq,
-  age               = median(data$age, na.rm = TRUE),
-  gender            = factor("0", levels = levels(data$gender)),          # pick reference level
-  asa_status        = factor("1", levels = levels(data$asa_status)),      # reference ASA
-  baseline_cancer   = 0,
-  baseline_cvd      = 0,
-  baseline_psych    = 0,
-  baseline_pulmonary= 0,
-  baseline_charlson = median(data$baseline_charlson, na.rm = TRUE),
-  mortality_rsi     = median(data$mortality_rsi, na.rm = TRUE),
-  ccsMort30Rate     = median(data$ccsMort30Rate, na.rm = TRUE),
-  procedure         = factor("Orthopedic & Spine", levels = levels(data$procedure))  # choose ref
+plot(Predict(fit_final_basic, hour, fun=plogis), xlab="Surgery Hour", ylab="Predicted 30-day Mortality Probability", main="Effect of Surgery Hour on 30-day Mortality")
+plot(Predict(fit_final_basic, mortality_rsi, fun=plogis), xlab="Mortality RSI", ylab="Predicted 30-day Mortality Probability", main="Effect of Mortality RSI on 30-day Mortality")
+plot(Predict(fit_final_basic, age, fun=plogis), xlab="Age", ylab="Predicted 30-day Mortality Probability", main="Effect of Age on 30-day Mortality")
+
+# unadjusted effect of hour
+fit_unadjusted <- lrm(
+  mort30 ~ hour,
+  data = data
 )
+plot(Predict(fit_unadjusted, hour, fun=plogis), xlab="Surgery Hour", ylab="Predicted 30-day Mortality Probability", main="Unadjusted Effect of Surgery Hour on 30-day Mortality")
 
-# 3) Get predicted log-odds + SE
-pred <- predict(model_hour_spline, newdata = newdat, type = "link", se.fit = TRUE)
+#################################
+# model diagnostics
+#################################
+stats <- fit_final_basic$stats
+ggplot( Predict(fit_final_basic), sepdiscrete= 'vertical' , vnames = 'names' ,
+         rdata =data ,
+         histSpike.opts = list(frac= function(fit_final_basic) .1*fit_final_basic/max(fit_final_basic) ))
 
-# 4) Convert to probabilities + CI
-newdat$pred_prob  <- plogis(pred$fit)
-newdat$lower_ci   <- plogis(pred$fit - 1.96 * pred$se.fit)
-newdat$upper_ci   <- plogis(pred$fit + 1.96 * pred$se.fit)
 
-# 5) Plot
-ggplot(newdat, aes(x = hour, y = pred_prob)) +
-  geom_line() +
-  geom_ribbon(aes(ymin = lower_ci, ymax = upper_ci), alpha = 0.2) +
-  labs(
-    x = "Surgery start time (hour)",
-    y = "Predicted 30-day mortality",
-    title = "Adjusted relationship between surgery time and 30-day mortality"
-  ) +
-  theme_minimal()
