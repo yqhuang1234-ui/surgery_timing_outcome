@@ -392,6 +392,10 @@ chi_square_results <- chi_square_results %>%
     names_prefix = "mort_rate_"
   )
 print(chi_square_results)
+# return variables with significant association
+sig_vars <- unique(chi_square_results$variable[chi_square_results$sig_level == "Yes"])
+cat("Variables with significant association with mort30 (p < 0.05):\n")
+print(sig_vars)
 
 plot_rsi_box_all <- function(data, cat_vars) {
   

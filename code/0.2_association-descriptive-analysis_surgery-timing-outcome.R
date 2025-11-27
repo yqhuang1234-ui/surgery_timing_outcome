@@ -141,6 +141,89 @@ cat("Continuous variables with significant difference by mort30 (p < 0.05) from 
 print(sig_wilcoxon_vars)
 print(t_test_results)
 
+
+# auto-select test
+
+auto_test_continuous <- function(data, outcome, vars) {
+  out <- list()
+  
+  # check outcome exists
+  if (!outcome %in% names(data)) {
+    stop("Outcome variable not found in data.")
+  }
+  
+  for (v in vars) {
+    if (!v %in% names(data)) {
+      warning(paste("Variable", v, "not found in data. Skipping."))
+      next
+    }
+    
+    x <- data[[v]]
+    y <- data[[outcome]]
+    
+    # remove rows with NA in x or y
+    complete_idx <- complete.cases(x, y)
+    x <- x[complete_idx]
+    y <- y[complete_idx]
+    
+    # split into groups: assume outcome is 0/1
+    g1 <- x[y == 0]
+    g2 <- x[y == 1]
+    
+    n1 <- length(g1)
+    n2 <- length(g2)
+    
+    # default
+    method <- NA
+    pval   <- NA
+    
+    if (n1 < 2 || n2 < 2) {
+      # not enough data to compare
+      method <- "insufficient data"
+      pval   <- NA
+    } else if (n1 >= 30 && n2 >= 30) {
+      # large samples: t-test OK by CLT
+      method <- "t-test (large N)"
+      test_res <- t.test(g1, g2)  # Welch t-test by default
+      pval <- test_res$p.value
+    } else {
+      # small samples: try Shapiro when size allows
+      p_norm1 <- if (n1 >= 3 && n1 <= 5000) shapiro.test(g1)$p.value else NA
+      p_norm2 <- if (n2 >= 3 && n2 <= 5000) shapiro.test(g2)$p.value else NA
+      
+      if (!is.na(p_norm1) && !is.na(p_norm2) &&
+          p_norm1 > 0.05 && p_norm2 > 0.05) {
+        method <- "t-test (normality OK)"
+        test_res <- t.test(g1, g2)
+        pval <- test_res$p.value
+      } else {
+        method <- "Wilcoxon (Mann-Whitney U)"
+        test_res <- wilcox.test(g1, g2, exact = FALSE)
+        pval <- test_res$p.value
+      }
+    }
+    
+    out[[v]] <- data.frame(
+      variable  = v,
+      method    = method,
+      p_value   = pval,
+      mean_0    = mean(g1, na.rm = TRUE),
+      mean_1    = mean(g2, na.rm = TRUE),
+      median_0  = median(g1, na.rm = TRUE),
+      median_1  = median(g2, na.rm = TRUE),
+      n0        = n1,
+      n1        = n2,
+      stringsAsFactors = FALSE
+    )
+  }
+  
+  bind_rows(out)
+}
+
+results <- auto_test_continuous(data, outcome = "mort30", vars = vars_continuous)
+print(results)
+
+
 #############################################################
 ## multicollinearity check for continuous variables
 #############################################################
@@ -248,7 +331,7 @@ print(missing_summary)
 # finalize variable lists for modeling
 #############################################
 vars_to_check <- c("age", "gender", "asa_status")
-vars_to_drop  <- c("bmi", "complication",
+vars_to_drop  <- c("bmi", 
                    "ccsComplicationRate","complication_rsi",
                    vars_categorical_binary[!vars_categorical_binary %in% sig_cat_vars]) 
 cat("Variables to drop due to non-significant association with mort30 or high correlation or high missingness:\n")

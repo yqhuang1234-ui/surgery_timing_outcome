@@ -5,7 +5,7 @@
 setwd("~/Dropbox/School/CU/fall 2025/BIOS 6618 adv biostatistical method/final project/surgery_timing_outcome")
 source("./code/0.0_setup_surgery-timing-outcome.R")
 # load processed data
-file_name_asa_factor <- "./data/processed/2025-11-24_dropna_regroup-procedure_no-encode.rds"
+file_name_asa_factor <- "./data/processed/2025-11-25_dropna_regroup-procedure_no-encode.rds"
 data <- readRDS(file_name_asa_factor)
 str(data)
 # check missingness for data
@@ -38,6 +38,54 @@ model_hour_spline <- glm(
   family = binomial,
   data   = data
 )
+#get aic and bic
+AIC(model_hour_spline)
+BIC(model_hour_spline)
+
+model_hour_spline_linear <- glm(
+  mort30 ~
+    age +                         # 
+    gender +
+    asa_status +
+    baseline_cancer +
+    baseline_cvd +
+    baseline_psych +
+    baseline_pulmonary +
+    baseline_charlson +
+    rcs(mortality_rsi,3) +               #
+    ccsMort30Rate +
+    hour +                        # linear for now
+    procedure,
+  family = binomial,
+  data   = data
+)
+summary(model_hour_spline_linear)
+AIC(model_hour_spline_linear)
+BIC(model_hour_spline_linear)
+summary(model_hour_spline)
+anova(model_hour_spline, test="LRT")
+model_hour_spline_complication <- glm(
+  complication ~
+    rcs(age,4) +                         # 
+    gender +
+    asa_status +
+    baseline_cancer +
+    baseline_cvd +
+    baseline_psych +
+    baseline_pulmonary +
+    baseline_charlson +
+    rcs(mortality_rsi,4) +               #
+    ccsMort30Rate +
+    rcs(hour,4) +                        # linear for now
+    procedure,
+  family = binomial,
+  data   = data
+)
+
+summary(model_hour_spline_complication)
+anova(model_hour_spline_complication, test="LRT")
+
+# count by hour
 
 # 1) Create a sequence of hours
 hour_seq <- seq(
