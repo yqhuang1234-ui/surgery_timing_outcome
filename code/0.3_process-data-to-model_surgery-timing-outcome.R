@@ -299,6 +299,10 @@ data_clean <- data_clean %>%
         "Orthopedic & Spine",
         "Gastrointestinal & Hernia"
       )
+    ),
+    dow = factor(
+      dow,
+      levels=c("1","2","3","4","5")
     )
   )
 # drop original procedure_group and ahrq_ccs

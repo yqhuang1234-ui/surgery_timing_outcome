@@ -7,11 +7,16 @@ source("./code/0.0_setup_surgery-timing-outcome.R")
 # load processed data
 file_name_asa_factor <- "./data/processed/2025-11-27_dropna_regroup-procedure_no-encode.rds"
 data <- readRDS(file_name_asa_factor)
+# drop problematic cols
+data <- data %>%
+  select(-c("ccsMort30Rate","dow","month"))
+
 str(data)
 # check missingness for data
 miss_summary <- naniar::miss_var_summary(data)
 print(miss_summary)
 names(data)
+
 
 #################################
 # build models
@@ -76,13 +81,14 @@ best_model <- fit_k[[as.character(best_k)]]
 anova(best_model)
 
 # finalize model formula
+final_model_rhs <- as.formula(
+  paste("mort30 ~ age + rcs(mortality_rsi,3) + hour",
+        if (length(other_covariates) > 0)
+          paste("+", paste(other_covariates, collapse = " + "))
+        else "")
+)
 fit_final_basic <- lrm(
-  as.formula(
-    paste("mort30 ~ age + rcs(mortality_rsi,3) + hour",
-          if (length(other_covariates) > 0)
-            paste("+", paste(other_covariates, collapse = " + "))
-          else "")
-  ),
+final_model_rhs,
   data = data
 )
 anova(fit_final_basic)
@@ -105,11 +111,190 @@ fit_unadjusted <- lrm(
 plot(Predict(fit_unadjusted, hour, fun=plogis), xlab="Surgery Hour", ylab="Predicted 30-day Mortality Probability", main="Unadjusted Effect of Surgery Hour on 30-day Mortality")
 
 #################################
-# model diagnostics
+# get results
 #################################
-stats <- fit_final_basic$stats
-ggplot( Predict(fit_final_basic), sepdiscrete= 'vertical' , vnames = 'names' ,
-         rdata =data ,
-         histSpike.opts = list(frac= function(fit_final_basic) .1*fit_final_basic/max(fit_final_basic) ))
+# this object contains coeffients, se, z statistic, wald p-values, confidence intervals
+## 1) Coefficients (betas)
+co <- coef(fit_final_basic)
+
+## 2) Variance–covariance matrix and SEs
+vc <- vcov(fit_final_basic)
+se <- sqrt(diag(vc))
+
+## 3) Wald Z-statistics and p-values
+z  <- co / se
+p  <- 2 * pnorm(-abs(z))
+
+## 4) Wald 95% CI for betas
+ci_beta <- confint.default(fit_final_basic)  # works for lrm objects
+
+## 5) Put everything together on OR scale
+options(scipen = 999)   # prevents scientific notation
+or_table <- data.frame(
+  term    = names(co),
+  beta    = round(co, 3),
+  se      = round(se, 3),
+  z       = round(z, 3),
+  p_value = ifelse(p < 0.001, "<0.001", round(p, 3)),
+  OR      = round(exp(co), 2),
+  lower95 = round(exp(ci_beta[, 1]), 2),
+  upper95 = round(exp(ci_beta[, 2]), 2),
+  row.names = NULL,
+  check.names = FALSE
+)
+
+
+or_table
+
+#significant variables at alpha = 0.05
+or_table %>%
+  filter(p_value != "<0.001" & p_value < 0.05 | p_value == "<0.001")
+
+# 1. Start from your existing or_table
+# or_table has: term, OR, lower95, upper95, p_value, etc.
+
+
+
+  
+plot_df <- or_table %>%
+    filter(term != "Intercept") %>%
+  filter(!is.na(OR)) %>%
+    mutate(
+      # numeric p-value
+      p_num = 2 * pnorm(-abs(beta / se)),
+      
+      # significance flag
+      signif = p_num < 0.05 &
+        ((lower95 > 1) | (upper95 < 1)),
+      
+      signif_group = ifelse(
+        signif,
+        "Significant (p < 0.05; 95% CI does not include 1)",
+        "Not significant (p ≥ 0.05 or 95% CI includes 1)"
+      ),
+      
+      # format p-value
+      label_p = ifelse(
+        p_num < 0.001, 
+        "p<0.001",
+        paste0("p=", sprintf("%.3f", p_num))
+      ),
+      
+      # text label for OR
+      label = paste0(sprintf("%.2f", OR), " (", label_p, ")")
+    ) %>%
+    # sort descending by OR
+    arrange(OR) %>%
+    mutate(term = factor(term, levels = term))
+
+ggplot(plot_df, aes(x = OR, y = term, color = signif_group)) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "grey40") +
+  
+  geom_errorbarh(aes(xmin = lower95, xmax = upper95), height = 0.15) +
+  geom_point(size = 2) +
+  
+  # label placed at upper CI bound
+  geom_text(
+    aes(x = upper95, label = label),
+    hjust = -0.1,
+    size = 3
+  ) +
+  
+  # log OR axis
+  scale_x_log10(expand = expansion(mult = c(0.05, 0.40))) +
+  
+  scale_color_manual(
+    name = NULL,
+    values = c(
+      "Significant (p < 0.05; 95% CI does not include 1)" = "firebrick",
+      "Not significant (p ≥ 0.05 or 95% CI includes 1)" = "grey40"
+    )
+  ) +
+  guides(color = guide_legend(ncol = 2)) + 
+  labs(
+    x = "Odds ratio (log scale)",
+    y = NULL,
+    title = "Adjusted odds ratios with 95% confidence intervals"
+  ) +
+  
+  theme_bw() +
+  theme(
+    panel.grid.minor = element_blank(),
+    axis.text.y = element_text(size = 9),
+    legend.position = "top",
+    legend.justification = "left"
+  )
+
+# effect plot
+# plot unadjusted and adjusted effects of hour on mortality showing two lines
+library(rms)
+library(ggplot2)
+library(dplyr)
+
+# Use fun = plogis to convert log-odds -> probability (0–1)
+p1 <- as.data.frame(Predict(fit_unadjusted, hour, fun = plogis)) %>%
+  mutate(model = "Unadjusted")
+
+p2 <- as.data.frame(Predict(fit_final_basic, hour, fun = plogis)) %>%
+  mutate(model = "Adjusted")
+
+combined <- bind_rows(p1, p2)
+
+ggplot(combined, aes(x = hour, y = yhat, color = model)) +
+  geom_line(size = 1.2) +
+  geom_ribbon(aes(ymin = lower, ymax = upper, fill = model),
+              alpha = 0.2, color = NA) +
+  labs(
+    x = "Surgery Hour",
+    y = "Predicted 30-day Mortality Probability",
+    title = "Adjusted vs. Unadjusted Association Between Surgery Hour and Mortality"
+  ) +
+  theme_bw() +
+  scale_color_manual(values = c("Unadjusted" = "red", "Adjusted" = "blue")) +
+  scale_fill_manual(values = c("Unadjusted" = "red", "Adjusted" = "blue"))
+
+#effect plot mortality_rsi
+ggplot(as.data.frame(Predict(fit_final_basic, mortality_rsi, fun=plogis)), 
+       aes(x = mortality_rsi, y = yhat)) +
+  geom_line(size=1.2, color="blue") +
+  geom_ribbon(aes(ymin=lower, ymax=upper), alpha=0.2, fill="blue") +
+  labs(
+    x = "Mortality RSI",
+    y = "Predicted 30-day Mortality Probability",
+    title = "Adjusted Association Between Mortality RSI and 30-day Mortality"
+  ) +
+  theme_bw()
+
+#################################
+# check overly influential points
+#################################
+lm_fit2 <- glm(final_model_rhs, data=data, family=binomial)
+summary(lm_fit2)
+# Jackknife
+jackknife_outliers <- sum(abs(rstudent(lm_fit2)) > 3)
+
+# Cook's D
+cooks_d_outliers <- sum(cooks.distance(lm_fit2) > 1)
+
+# Leverage
+leverage_threshold <- 2 * (length(coef(lm_fit2)) / nrow(data))
+leverage_outliers <- sum(hatvalues(lm_fit2) > leverage_threshold)
+
+# DFBETAS Intercept
+dfbetas_threshold <- 2 / sqrt(nrow(data))
+dfbetas_intercept_outliers <- sum(abs(dfbetas(lm_fit2)[,1]) > dfbetas_threshold)
+# DFBETAS Slope
+dfbetas_slope_outliers <- sum(abs(dfbetas(lm_fit2)[,2]) > dfbetas_threshold)
+
+# DFFITS
+dffits_threshold <- 2 * sqrt(length(coef(lm_fit2)) / nrow(data))
+dffits_outliers <- sum(abs(dffits(lm_fit2)) > dffits_threshold)
+
+# Create table
+outlier_table <- data.frame(
+  Method = c("Jackknife ±3", "Cook's D", "Leverage", "DFBETAS Intercept", "DFBETAS Slope", "DFFITS"),
+  Number_of_Observations = c(jackknife_outliers, cooks_d_outliers, leverage_outliers, dfbetas_intercept_outliers, dfbetas_slope_outliers, dffits_outliers)
+)
+kable(outlier_table)
 
 
