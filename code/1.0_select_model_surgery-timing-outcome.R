@@ -5,11 +5,8 @@
 setwd("~/Dropbox/School/CU/fall 2025/BIOS 6618 adv biostatistical method/final project/surgery_timing_outcome")
 source("./code/0.0_setup_surgery-timing-outcome.R")
 # load processed data
-file_name_asa_factor <- "./data/processed/2025-11-27_dropna_regroup-procedure_no-encode.rds"
+file_name_asa_factor <- "./data/processed/2025-11-29_dropna_regroup-procedure_no-encode.rds"
 data <- readRDS(file_name_asa_factor)
-# drop problematic cols
-data <- data %>%
-  select(-c("ccsMort30Rate","dow","month"))
 
 str(data)
 # check missingness for data
@@ -80,6 +77,7 @@ best_model <- fit_k[[as.character(best_k)]]
 #if nonlinear has small p keep spline, if p large change to linear
 anova(best_model)
 
+
 # finalize model formula
 final_model_rhs <- as.formula(
   paste("mort30 ~ age + rcs(mortality_rsi,3) + hour",
@@ -93,15 +91,50 @@ final_model_rhs,
 )
 anova(fit_final_basic)
 
+# check hour linear vs group
+# -------------------------
+# 1. CREATE HOUR CATEGORIES
+# -------------------------
+data$hour_cat <- cut(
+  data$hour,
+  breaks = c(6, 8, 11, 13, 15, 17, 19),
+  right = FALSE,  # intervals left-inclusive
+  include.lowest = FALSE,
+  labels = c("6-8am", "8-11am", "11-1pm", "1-3pm", "3-5pm", "5-7pm")
+)
+
+# check distribution
+table(data$hour_cat, useNA = "ifany")
+#return row for na hour_cat
+data[is.na(data$hour_cat), ]
+#if hour=19 set it to "5-7"
+data$hour_cat[is.na(data$hour_cat) & data$hour == 19] <- "5-7pm"
+table(data$hour_cat, useNA = "ifany")
+# -------------------------
+# 2. FIT MODEL WITH HOUR AS CATEGORICAL VARIABLE
+# -------------------------
+final_model_rhs_cat <- as.formula(
+  paste("mort30 ~ age + rcs(mortality_rsi,3) + hour_cat",
+        if (length(other_covariates) > 0)
+          paste("+", paste(other_covariates, collapse = " + "))
+        else "")
+)
+fit_final_basic_cat <- lrm(
+  final_model_rhs_cat,
+  data = data
+)
+anova(fit_final_basic_cat)
+
 #check AIC for all models
 c(
   AIC_k,
-  final=AIC(fit_final_basic)
+  final=AIC(fit_final_basic),
+  final_cat=AIC(fit_final_basic_cat)
 )
 
-plot(Predict(fit_final_basic, hour, fun=plogis), xlab="Surgery Hour", ylab="Predicted 30-day Mortality Probability", main="Effect of Surgery Hour on 30-day Mortality")
-plot(Predict(fit_final_basic, mortality_rsi, fun=plogis), xlab="Mortality RSI", ylab="Predicted 30-day Mortality Probability", main="Effect of Mortality RSI on 30-day Mortality")
-plot(Predict(fit_final_basic, age, fun=plogis), xlab="Age", ylab="Predicted 30-day Mortality Probability", main="Effect of Age on 30-day Mortality")
+# replace final model with categorical hour
+fit_final_basic <- fit_final_basic_cat
+data$hour <- data$hour_cat
 
 # unadjusted effect of hour
 fit_unadjusted <- lrm(
@@ -224,6 +257,8 @@ ggplot(plot_df, aes(x = OR, y = term, color = signif_group)) +
     legend.position = "top",
     legend.justification = "left"
   )
+#save_plot
+
 
 # effect plot
 # plot unadjusted and adjusted effects of hour on mortality showing two lines

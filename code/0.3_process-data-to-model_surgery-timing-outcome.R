@@ -4,6 +4,22 @@ source("./code/0.0_setup_surgery-timing-outcome.R")
 
 cat("=== Structure ===\n")
 str(data)
+summary(data)
+
+#############################################################
+# logic cleaning
+#############################################################
+# keep age >= 18
+orin_dim <- dim(data)
+print(paste0("Original data dimensions: ", orin_dim[1], " rows, ", orin_dim[2], " columns"))
+data <- data %>%
+  filter(age >= 18)
+cat("Data dimensions after filtering age >= 18:\n")
+print(dim(data))
+removed_rows <- orin_dim[1] - nrow(data)
+cat(paste0("Number of rows removed due to age < 18: ", removed_rows, "\n"))
+# check age summary
+summary(data$age)
 
 
 #############################################################
@@ -303,19 +319,129 @@ data_clean <- data_clean %>%
     dow = factor(
       dow,
       levels=c("1","2","3","4","5")
+    ),
+    month = factor(
+      month,
+      levels=c("1","2","3","4","5","6","7","8","9","10","11","12")
     )
   )
 # drop original procedure_group and ahrq_ccs
 data_to_model <- data_clean %>%
-  select(-c(procedure_group, ahrq_ccs, "complication","moonphase"))
+  select(-c(procedure_group, ahrq_ccs, "complication","moonphase","dow","month","ccsMort30Rate"))
 str(data_to_model)
+
+###################################################
+# descriptive plots for report purposes
+###################################################
+# Convert continuous to 4 quantile groups for meaningful comparison
+library(dplyr)
+library(Hmisc)
+library(rms)
+
+get_uni_prop <- function(df, var) {
+  var_sym <- rlang::ensym(var)
+  
+  df %>%
+    group_by(!!var_sym) %>%
+    summarise(
+      mort_rate = mean(mort30),
+      n = n(),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      variable = rlang::as_string(var_sym),
+      category = as.character(!!var_sym)
+    )
+}
+
+data_uni <- data_to_model %>%
+  mutate(
+    age = cut2(age, g = 4),
+    mortality_rsi = cut2(mortality_rsi, g = 4),
+    hour = cut2(hour, g = 4),
+    baseline_charlson = cut2(baseline_charlson, g = 4)
+  )
+
+# filter vars
+remove_vec <- c("mort30")
+vars <- setdiff(names(data_to_model), remove_vec)
+
+uni_list <- lapply(vars, function(v) get_uni_prop(data_uni, !!sym(v)))
+uni <- bind_rows(uni_list)
+
+library(dplyr)
+library(forcats)
+library(ggplot2)
+library(patchwork)   # install.packages("patchwork") if needed
+
+main_vars <- c("age", "hour", "asa_status", "mortality_rsi",
+               "baseline_charlson", "procedure", "gender")
+
+uni_main <- uni %>% 
+  filter(variable %in% main_vars) %>%
+  mutate(variable = factor(variable, levels = main_vars))
+
+uni_base <- uni %>% 
+  filter(!variable %in% main_vars) %>%
+  mutate(variable = factor(variable, levels = sort(unique(variable))))
+xmax <- max(uni$mort_rate, na.rm = TRUE)
+p_main <- ggplot(uni_main, aes(x = mort_rate, y = fct_rev(category))) +
+  geom_point(size = 2, alpha = 0.9) +
+  facet_wrap(~ variable, scales = "free_y", ncol = 1, strip.position = "top") +
+  scale_x_continuous(limits = c(0, xmax)) + 
+  labs(
+    x = "30-day Mortality Proportion",
+    y = NULL,
+    title = "Univariable Summaries of 30-day Mortality"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.text.y = element_text(size = 10),
+    axis.text.x = element_text(size = 10),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.spacing = unit(0.5, "lines"),
+    plot.title = element_text(face = "bold", size = 16, hjust = 0.5)
+  )
+p_base <- ggplot(uni_base, aes(x = mort_rate, y = fct_rev(category))) +
+  geom_point(size = 2, alpha = 0.9) +
+  facet_wrap(~ variable, scales = "free_y", ncol = 1, strip.position = "top") +
+  scale_x_continuous(limits = c(0, xmax)) + 
+  labs(
+    x = "30-day Mortality Proportion",
+    y = NULL
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.text.y = element_text(size = 10),
+    axis.text.x = element_text(size = 10),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.spacing = unit(0.5, "lines"),
+    plot.title = element_blank()
+  )
+p_main + p_base + plot_layout(ncol = 2, widths = c(1, 1))
+
+#add today's date to file name
+today_date <- format(Sys.Date(), "%Y-%m-%d")
+print(today_date)
+# create figure directory if not exist
+figure_dir <- file.path("results", today_date,'/')
+print(figure_dir)
+
+if (!dir.exists(figure_dir)) {
+  dir.create(figure_dir, recursive = TRUE)
+}
+# save figure
+ggsave(paste0(figure_dir, "1_univariable-summary_figure.png"), width=6, height=8, dpi = 300)
+
 
 ###################################################
 # save cleaned data for modeling
 ###################################################
-#add today's date to file name
-today_date <- format(Sys.Date(), "%Y-%m-%d")
-print(today_date)
+
 #create directory if not exist
 if (!dir.exists("./data/processed/")) {
   dir.create("./data/processed/")
