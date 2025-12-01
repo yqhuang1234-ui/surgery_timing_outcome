@@ -374,9 +374,153 @@ cat("Cleaned data saved for modeling:\n")
 print(paste0("./data/processed/", filename_without_encode))
 
 
-###################################################
-# descriptive plots for report purposes
-###################################################
+# baseline characteristics summaries between hour group
+# create figure directory if not exist
+figure_dir <- file.path("results", today_date,'/')
+print(figure_dir)
+
+if (!dir.exists(figure_dir)) {
+  dir.create(figure_dir, recursive = TRUE)
+}
+## --------------------------------------------------
+## 0. Pre-processing: factors, labels, 0/1 → No/Yes
+## --------------------------------------------------
+
+# set your hour_cat levels if you haven't already
+data_to_plot <- data_to_model %>%
+  mutate(
+    # gender: 0 = Male, 1 = Female
+    gender = factor(ifelse(gender == 1, "Female", "Male"),
+                    levels = c("Male", "Female")),
+    mort30 = factor(ifelse(mort30 == 1, "Yes", "No"),
+                    levels = c("No", "Yes")),
+    asa_status = factor(asa_status,
+                        levels = c("1", "2", "3"),
+                        labels = c(
+                          "I-II",
+                          "III",
+                          "IV-VI"
+                        )
+    )
+  )
+
+# list of binary baseline comorbidity variables that are 0/1
+comorb_vars <- c(
+  "baseline_cancer", "baseline_cvd", "baseline_dementia",
+  "baseline_diabetes", "baseline_digestive",
+  "baseline_osteoart", "baseline_psych", "baseline_pulmonary"
+)
+
+# recode all of them 0/1 -> No/Yes
+data_to_plot <- data_to_plot %>%
+  mutate(
+    across(all_of(comorb_vars),
+           ~ factor(ifelse(. == 1, "Yes", "No"),
+                    levels = c("No", "Yes")))
+  )
+
+## --------------------------------------------------
+## 1. Variable sets & ordering
+## --------------------------------------------------
+
+cont_vars <- c("age", "mortality_rsi", "baseline_charlson")
+
+cat_vars <- names(data_to_plot)[
+  !(names(data_to_plot) %in% c(cont_vars,  "hour", "hour_cat"))
+]
+
+# put main variables first, then comorbidities, then any other cats
+main_cat <- c("gender", "asa_status","procedure")
+other_cat <- setdiff(cat_vars, c(main_cat, comorb_vars))
+
+var_order <- c(
+  "age",
+  "mortality_rsi",
+  "baseline_charlson",
+  main_cat,
+  comorb_vars,
+  other_cat
+)
+var_order
+## --------------------------------------------------
+## 2. gtsummary baseline table
+## --------------------------------------------------
+
+tbl_baseline <-
+  data_to_plot %>%
+  select(hour_cat, all_of(var_order)) %>%
+  tbl_summary(
+    by = hour_cat,
+    statistic = list(
+      all_continuous()  ~ "{mean} ± {sd}",
+      all_categorical() ~ "{n} ({p}%)"
+    ),
+    missing = "no",
+    label = list(
+      age              ~ "Age",
+      mortality_rsi    ~ "Risk Stratification Index (30-day mortality)",
+      baseline_charlson~ "Charlson Comorbidity Index",
+      gender           ~ "Gender",
+      procedure        ~ "Procedure",
+      asa_status       ~ "ASA Physical Status",
+      # comorbidities
+      baseline_cancer      ~ "Cancer",
+      baseline_cvd         ~ "Cardiovascular/Cerebrovascular disease",
+      baseline_dementia    ~ "Dementia",
+      baseline_diabetes    ~ "Diabetes",
+      baseline_digestive   ~ "Digestive disease",
+      baseline_osteoart    ~ "Osteoarthritis",
+      baseline_psych       ~ "Psychiatric disorder",
+      baseline_pulmonary   ~ "Pulmonary disease",
+      mort30               ~ "30-day Mortality"
+    )
+  ) %>%
+  add_overall(last = FALSE) %>%   
+  add_p(
+    test = list(
+      all_continuous()  ~ "oneway.test",
+      all_categorical() ~ "chisq.test",
+      baseline_dementia ~ "fisher.test",
+      mort30            ~ "fisher.test"
+    ),
+    test.args = list(
+      all_continuous()  ~ list(var.equal = TRUE),
+      baseline_dementia ~ list(simulate.p.value = TRUE, B = 10000),
+      mort30            ~ list(simulate.p.value = TRUE, B = 10000)
+    )
+  ) %>%
+  modify_header(label ~ "**Variable**") %>%
+  bold_labels()
+
+## --------------------------------------------------
+## 3. Convert to gt and save PNG
+##    (wide but not too tall)
+## --------------------------------------------------
+
+gt_tbl <-
+  as_gt(tbl_baseline) %>%
+  gt::tab_options(
+    table.font.size   = 9,           # smaller font
+    data_row.padding  = px(1),       # tighten row spacing
+    heading.padding   = px(2)
+  )
+gt_tbl
+
+gtsave(
+  gt_tbl,
+  filename = paste0(figure_dir, "1_baseline-hour-group-summary_table.png"),
+  vwidth  = 2400,  # pixels: wide
+  vheight = 700,   # pixels: relatively short
+  zoom=6
+)
+
+# extract p-values table
+sig_vars <- tbl_baseline$table_body %>%
+  select(variable, p.value) %>%        # these columns DO exist in table_body
+  filter(!is.na(p.value), p.value < 0.05)
+
+sig_vars
+
 # Convert continuous to 4 quantile groups for meaningful comparison
 #rows
 (32001-212-2-8) == nrow(data_to_model)
@@ -463,12 +607,5 @@ p_base <- ggplot(uni_base, aes(x = mort_rate, y = fct_rev(category))) +
 p_main + p_base + plot_layout(ncol = 2, widths = c(1, 1))
 
 
-# create figure directory if not exist
-figure_dir <- file.path("results", today_date,'/')
-print(figure_dir)
-
-if (!dir.exists(figure_dir)) {
-  dir.create(figure_dir, recursive = TRUE)
-}
 # save figure
 ggsave(paste0(figure_dir, "1_univariable-summary_figure.png"), width=6, height=8, dpi = 300)

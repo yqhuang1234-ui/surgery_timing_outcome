@@ -107,8 +107,54 @@ fit_unadjusted <- lrm(
 )
 plot(Predict(fit_unadjusted, hour_cat, fun=plogis), xlab="Surgery Hour", ylab="Predicted 30-day Mortality Probability", main="Unadjusted Effect of Surgery Hour on 30-day Mortality")
 plot(Predict(fit_final_basic, hour_cat))
+
 #################################
-# get results
+# check overly influential points
+#################################
+lm_fit2 <- glm(final_model_rhs, data=data, family=binomial)
+summary(lm_fit2)
+# Jackknife
+jackknife_outliers <- sum(abs(rstudent(lm_fit2)) > 3)
+
+# Cook's D
+cooks_d_outliers <- sum(cooks.distance(lm_fit2) > 1)
+
+# Leverage
+leverage_threshold <- 2 * (length(coef(lm_fit2)) / nrow(data))
+leverage_outliers <- sum(hatvalues(lm_fit2) > leverage_threshold)
+
+# DFBETAS Intercept
+dfbetas_threshold <- 2 / sqrt(nrow(data))
+dfbetas_intercept_outliers <- sum(abs(dfbetas(lm_fit2)[,1]) > dfbetas_threshold)
+# DFBETAS Slope
+dfbetas_slope_outliers <- sum(abs(dfbetas(lm_fit2)[,2]) > dfbetas_threshold)
+
+# DFFITS
+dffits_threshold <- 2 * sqrt(length(coef(lm_fit2)) / nrow(data))
+dffits_outliers <- sum(abs(dffits(lm_fit2)) > dffits_threshold)
+
+# Create table
+outlier_table <- data.frame(
+  Method = c("Jackknife ±3", "Cook's D", "Leverage", "DFBETAS Intercept", "DFBETAS Slope", "DFFITS"),
+  Number_of_Observations = c(jackknife_outliers, cooks_d_outliers, leverage_outliers, dfbetas_intercept_outliers, dfbetas_slope_outliers, dffits_outliers)
+)
+kable(outlier_table)
+
+###################################################
+# plots for report purposes
+###################################################
+#save_plot
+# create figure directory if not exist
+today_date <- format(Sys.Date(), "%Y-%m-%d")
+figure_dir <- file.path("results", today_date,'/')
+print(figure_dir)
+
+if (!dir.exists(figure_dir)) {
+  dir.create(figure_dir, recursive = TRUE)
+}
+
+#################################
+# get results from final model
 #################################
 # this object contains coeffients, se, z statistic, wald p-values, confidence intervals
 ## 1) Coefficients (betas)
@@ -125,6 +171,8 @@ p  <- 2 * pnorm(-abs(z))
 ## 4) Wald 95% CI for betas
 ci_beta <- confint.default(fit_final_basic)  # works for lrm objects
 
+# -------------- VARIABLE LABELS & LEVEL LABELS -------------------
+
 ## 5) Put everything together on OR scale
 options(scipen = 999)   # prevents scientific notation
 or_table <- data.frame(
@@ -139,9 +187,43 @@ or_table <- data.frame(
   row.names = NULL,
   check.names = FALSE
 )
+or_table <- or_table %>%
+  mutate(
+    clean_term = dplyr::recode(term,
+                               
+                               # continuous variables  
+                               "age"               = "Age, years",
+                               "mortality_rsi"     = "Risk Stratification Index (30-day mortality)",
+                               "baseline_charlson" = "Charlson Comorbidity Index",
+                               
+                               # gender (binary)
+                               "gender=1" = "Gender = Female (vs Male)",
+                               
+                               # ASA levels
+                               "asa_status=2" = "ASA III (vs I–II)",
+                               "asa_status=3" = "ASA IV–VI (vs I–II)",
+                               
+                               # Procedure categories
+                               "procedure=GI"     = "Gastrointestinal & Hernia (vs reference)",
+                               "procedure=Ortho"  = "Orthopedic & Spine (vs reference)",
+                               "procedure=Gyn"    = "Gynecologic (vs reference)",
+                               "procedure=Uro"    = "Urologic (vs reference)",
+                               "procedure=Other"  = "Other Non-Major (vs reference)",
+                               
+                               # Binary comorbidities (0/1)
+                               "baseline_cancer=1"    = "Cancer: Yes (vs No)",
+                               "baseline_cvd=1"       = "Cardiovascular disease: Yes (vs No)",
+                               "baseline_dementia=1"  = "Dementia: Yes (vs No)",
+                               "baseline_diabetes=1"  = "Diabetes: Yes (vs No)",
+                               "baseline_digestive=1" = "Digestive disease: Yes (vs No)",
+                               "baseline_osteoart=1"  = "Osteoarthritis: Yes (vs No)",
+                               "baseline_psych=1"     = "Psychiatric disorder: Yes (vs No)",
+                               "baseline_pulmonary=1" = "Pulmonary disease: Yes (vs No)",
+                               
+                               .default = term    # fallback preserves anything unmapped
+    )
+  )
 
-
-or_table
 
 #significant variables at alpha = 0.05
 or_table %>%
@@ -150,39 +232,36 @@ or_table %>%
 # 1. Start from your existing or_table
 # or_table has: term, OR, lower95, upper95, p_value, etc.
 
-
-
-  
 plot_df <- or_table %>%
-    filter(term != "Intercept") %>%
+  filter(term != "Intercept") %>%
   filter(!is.na(OR)) %>%
-    mutate(
-      # numeric p-value
-      p_num = 2 * pnorm(-abs(beta / se)),
-      
-      # significance flag
-      signif = p_num < 0.05 &
-        ((lower95 > 1) | (upper95 < 1)),
-      
-      signif_group = ifelse(
-        signif,
-        "Significant (p < 0.05; 95% CI does not include 1)",
-        "Not significant (p ≥ 0.05 or 95% CI includes 1)"
-      ),
-      
-      # format p-value
-      label_p = ifelse(
-        p_num < 0.001, 
-        "p<0.001",
-        paste0("p=", sprintf("%.3f", p_num))
-      ),
-      
-      # text label for OR
-      label = paste0(sprintf("%.2f", OR), " (", label_p, ")")
-    ) %>%
-    # sort descending by OR
-    arrange(OR) %>%
-    mutate(term = factor(term, levels = term))
+  mutate(
+    # numeric p-value
+    p_num = 2 * pnorm(-abs(beta / se)),
+    
+    # significance flag
+    signif = p_num < 0.05 &
+      ((lower95 > 1) | (upper95 < 1)),
+    
+    signif_group = ifelse(
+      signif,
+      "Significant (p < 0.05; 95% CI does not include 1)",
+      "Not significant (p ≥ 0.05 or 95% CI includes 1)"
+    ),
+    
+    # format p-value
+    label_p = ifelse(
+      p_num < 0.001, 
+      "p<0.001",
+      paste0("p=", sprintf("%.3f", p_num))
+    ),
+    
+    # text label for OR
+    label = paste0(sprintf("%.2f", OR), " (", label_p, ")")
+  ) %>%
+  # sort descending by OR
+  arrange(OR) %>%
+  mutate(term = factor(term, levels = term))
 
 ggplot(plot_df, aes(x = OR, y = term, color = signif_group)) +
   geom_vline(xintercept = 1, linetype = "dashed", color = "grey40") +
@@ -220,19 +299,6 @@ ggplot(plot_df, aes(x = OR, y = term, color = signif_group)) +
     legend.position = "top",
     legend.justification = "left"
   )
-#save_plot
-#add today's date to file name
-today_date <- format(Sys.Date(), "%Y-%m-%d")
-print(today_date)
-#create directory if not exist
-if (!dir.exists("./data/processed/")) {
-  dir.create("./data/processed/")
-}
-#save data
-filename_without_encode <- paste0(today_date, "_dropna_regroup-procedure_no-encode.rds")
-saveRDS(data_to_model, file = paste0("./data/processed/", filename_without_encode))
-cat("Cleaned data saved for modeling:\n")
-
 
 # effect plot
 # plot unadjusted and adjusted effects of hour on mortality showing two lines
@@ -269,7 +335,7 @@ ggplot(
     legend.position = "top",
     legend.title = element_blank()   # remove legend title
   )
-  scale_color_manual(values = c("Unadjusted" = "red", "Adjusted" = "blue")) +
+scale_color_manual(values = c("Unadjusted" = "red", "Adjusted" = "blue")) +
   scale_fill_manual(values = c("Unadjusted" = "red", "Adjusted" = "blue"))
 
 #effect plot mortality_rsi
@@ -278,42 +344,9 @@ ggplot(as.data.frame(Predict(fit_final_basic, mortality_rsi, fun=plogis)),
   geom_line(size=1.2, color="blue") +
   geom_ribbon(aes(ymin=lower, ymax=upper), alpha=0.2, fill="blue") +
   labs(
-    x = "Mortality RSI",
-    y = "Predicted 30-day Mortality Probability",
-    title = "Adjusted Association Between Mortality RSI and 30-day Mortality"
+    x = "Risk Stratification Index (30-day Mortality)",
+    y = "Predicted 30-day Mortality Probability"
   ) +
   theme_bw()
-
-#################################
-# check overly influential points
-#################################
-lm_fit2 <- glm(final_model_rhs, data=data, family=binomial)
-summary(lm_fit2)
-# Jackknife
-jackknife_outliers <- sum(abs(rstudent(lm_fit2)) > 3)
-
-# Cook's D
-cooks_d_outliers <- sum(cooks.distance(lm_fit2) > 1)
-
-# Leverage
-leverage_threshold <- 2 * (length(coef(lm_fit2)) / nrow(data))
-leverage_outliers <- sum(hatvalues(lm_fit2) > leverage_threshold)
-
-# DFBETAS Intercept
-dfbetas_threshold <- 2 / sqrt(nrow(data))
-dfbetas_intercept_outliers <- sum(abs(dfbetas(lm_fit2)[,1]) > dfbetas_threshold)
-# DFBETAS Slope
-dfbetas_slope_outliers <- sum(abs(dfbetas(lm_fit2)[,2]) > dfbetas_threshold)
-
-# DFFITS
-dffits_threshold <- 2 * sqrt(length(coef(lm_fit2)) / nrow(data))
-dffits_outliers <- sum(abs(dffits(lm_fit2)) > dffits_threshold)
-
-# Create table
-outlier_table <- data.frame(
-  Method = c("Jackknife ±3", "Cook's D", "Leverage", "DFBETAS Intercept", "DFBETAS Slope", "DFFITS"),
-  Number_of_Observations = c(jackknife_outliers, cooks_d_outliers, leverage_outliers, dfbetas_intercept_outliers, dfbetas_slope_outliers, dffits_outliers)
-)
-kable(outlier_table)
-
-
+# save figure
+ggsave(paste0(figure_dir, "2_mortality-rsi-effect_figure.png"), width=4, height=4, dpi = 300)
