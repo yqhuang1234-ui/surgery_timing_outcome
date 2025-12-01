@@ -5,7 +5,7 @@
 setwd("~/Dropbox/School/CU/fall 2025/BIOS 6618 adv biostatistical method/final project/surgery_timing_outcome")
 source("./code/0.0_setup_surgery-timing-outcome.R")
 # load processed data
-file_name_asa_factor <- "./data/processed/2025-11-29_dropna_regroup-procedure_no-encode.rds"
+file_name_asa_factor <- "./data/processed/2025-11-30_dropna_regroup-procedure_no-encode.rds"
 data <- readRDS(file_name_asa_factor)
 
 str(data)
@@ -13,6 +13,7 @@ str(data)
 miss_summary <- naniar::miss_var_summary(data)
 print(miss_summary)
 names(data)
+dim(data)
 
 
 #################################
@@ -21,6 +22,7 @@ names(data)
 # set up
 vars_spline <- c("age", "mortality_rsi")
 var_exporsure <- "hour"
+var_exporsure_cat <- "hour_cat"
 var_outcome <- "mort30"
 dd <- datadist(data)
 options(datadist = "dd")
@@ -28,7 +30,7 @@ options(datadist = "dd")
 # automatically define other covariates
 other_covariates <- setdiff(
   names(data),
-  c(var_outcome, var_exporsure, vars_spline)
+  c(var_outcome, var_exporsure, vars_spline, var_exporsure_cat)
 )
 print(other_covariates)
 print(length(other_covariates))
@@ -45,7 +47,7 @@ base_rhs <- paste(
 fit_k <- list()
 AIC_k <- numeric()
 
-for (K in c(0, 3, 4)) {
+for (K in c(0, 3, 4,5)) {
   if (K == 0) {
     # k = 0 = linear model: no rcs(), just linear terms
     f <- lrm(
@@ -64,7 +66,7 @@ for (K in c(0, 3, 4)) {
     )
   }
   fit_k[[as.character(K)]] <- f
-  AIC_k[as.character(K)] <- AIC(f)
+  AIC_k[as.character(K)] <- round(AIC(f),0)
 }
 
 AIC_k
@@ -77,72 +79,34 @@ best_model <- fit_k[[as.character(best_k)]]
 #if nonlinear has small p keep spline, if p large change to linear
 anova(best_model)
 
-
-# finalize model formula
+# -------------------------
+# FIT MODEL WITH HOUR AS CATEGORICAL VARIABLE
+# -------------------------
 final_model_rhs <- as.formula(
-  paste("mort30 ~ age + rcs(mortality_rsi,3) + hour",
-        if (length(other_covariates) > 0)
-          paste("+", paste(other_covariates, collapse = " + "))
-        else "")
-)
-fit_final_basic <- lrm(
-final_model_rhs,
-  data = data
-)
-anova(fit_final_basic)
-
-# check hour linear vs group
-# -------------------------
-# 1. CREATE HOUR CATEGORIES
-# -------------------------
-data$hour_cat <- cut(
-  data$hour,
-  breaks = c(6, 8, 11, 13, 15, 17, 19),
-  right = FALSE,  # intervals left-inclusive
-  include.lowest = FALSE,
-  labels = c("6-8am", "8-11am", "11-1pm", "1-3pm", "3-5pm", "5-7pm")
-)
-
-# check distribution
-table(data$hour_cat, useNA = "ifany")
-#return row for na hour_cat
-data[is.na(data$hour_cat), ]
-#if hour=19 set it to "5-7"
-data$hour_cat[is.na(data$hour_cat) & data$hour == 19] <- "5-7pm"
-table(data$hour_cat, useNA = "ifany")
-# -------------------------
-# 2. FIT MODEL WITH HOUR AS CATEGORICAL VARIABLE
-# -------------------------
-final_model_rhs_cat <- as.formula(
   paste("mort30 ~ age + rcs(mortality_rsi,3) + hour_cat",
         if (length(other_covariates) > 0)
           paste("+", paste(other_covariates, collapse = " + "))
         else "")
 )
-fit_final_basic_cat <- lrm(
-  final_model_rhs_cat,
+fit_final_basic <- lrm(
+  final_model_rhs,
   data = data
 )
-anova(fit_final_basic_cat)
+anova(fit_final_basic)
 
 #check AIC for all models
 c(
   AIC_k,
-  final=AIC(fit_final_basic),
-  final_cat=AIC(fit_final_basic_cat)
+  final=round(AIC(fit_final_basic),0)
 )
-
-# replace final model with categorical hour
-fit_final_basic <- fit_final_basic_cat
-data$hour <- data$hour_cat
 
 # unadjusted effect of hour
 fit_unadjusted <- lrm(
-  mort30 ~ hour,
+  mort30 ~ hour_cat,
   data = data
 )
-plot(Predict(fit_unadjusted, hour, fun=plogis), xlab="Surgery Hour", ylab="Predicted 30-day Mortality Probability", main="Unadjusted Effect of Surgery Hour on 30-day Mortality")
-
+plot(Predict(fit_unadjusted, hour_cat, fun=plogis), xlab="Surgery Hour", ylab="Predicted 30-day Mortality Probability", main="Unadjusted Effect of Surgery Hour on 30-day Mortality")
+plot(Predict(fit_final_basic, hour_cat))
 #################################
 # get results
 #################################
@@ -246,8 +210,7 @@ ggplot(plot_df, aes(x = OR, y = term, color = signif_group)) +
   guides(color = guide_legend(ncol = 2)) + 
   labs(
     x = "Odds ratio (log scale)",
-    y = NULL,
-    title = "Adjusted odds ratios with 95% confidence intervals"
+    y = NULL
   ) +
   
   theme_bw() +
@@ -258,33 +221,54 @@ ggplot(plot_df, aes(x = OR, y = term, color = signif_group)) +
     legend.justification = "left"
   )
 #save_plot
+#add today's date to file name
+today_date <- format(Sys.Date(), "%Y-%m-%d")
+print(today_date)
+#create directory if not exist
+if (!dir.exists("./data/processed/")) {
+  dir.create("./data/processed/")
+}
+#save data
+filename_without_encode <- paste0(today_date, "_dropna_regroup-procedure_no-encode.rds")
+saveRDS(data_to_model, file = paste0("./data/processed/", filename_without_encode))
+cat("Cleaned data saved for modeling:\n")
 
 
 # effect plot
 # plot unadjusted and adjusted effects of hour on mortality showing two lines
-library(rms)
-library(ggplot2)
-library(dplyr)
+
 
 # Use fun = plogis to convert log-odds -> probability (0–1)
-p1 <- as.data.frame(Predict(fit_unadjusted, hour, fun = plogis)) %>%
+# Get predictions for unadjusted and adjusted models
+p1 <- as.data.frame(Predict(fit_unadjusted, hour_cat, fun = plogis)) %>%
   mutate(model = "Unadjusted")
 
-p2 <- as.data.frame(Predict(fit_final_basic, hour, fun = plogis)) %>%
+p2 <- as.data.frame(Predict(fit_final_basic, hour_cat, fun = plogis)) %>%
   mutate(model = "Adjusted")
 
 combined <- bind_rows(p1, p2)
 
-ggplot(combined, aes(x = hour, y = yhat, color = model)) +
-  geom_line(size = 1.2) +
-  geom_ribbon(aes(ymin = lower, ymax = upper, fill = model),
-              alpha = 0.2, color = NA) +
+# Ensure hour_cat is a factor in the combined data too
+
+ggplot(
+  combined,
+  aes(x = hour_cat, y = yhat, color = model, group = model)
+) +
+  geom_line(aes(group = model), size = 1.2) +
+  geom_ribbon(
+    aes(ymin = lower, ymax = upper, fill = model, group = model),
+    alpha = 0.2,
+    color = NA
+  ) +
   labs(
-    x = "Surgery Hour",
-    y = "Predicted 30-day Mortality Probability",
-    title = "Adjusted vs. Unadjusted Association Between Surgery Hour and Mortality"
+    x = "Surgery Hour Category",
+    y = "Predicted 30-day Mortality Probability"
   ) +
   theme_bw() +
+  theme(
+    legend.position = "top",
+    legend.title = element_blank()   # remove legend title
+  )
   scale_color_manual(values = c("Unadjusted" = "red", "Adjusted" = "blue")) +
   scale_fill_manual(values = c("Unadjusted" = "red", "Adjusted" = "blue"))
 

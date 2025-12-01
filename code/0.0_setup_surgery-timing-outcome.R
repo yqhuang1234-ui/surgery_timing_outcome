@@ -12,7 +12,7 @@ load_or_install <- function(pkg){
 # List of needed packages
 packages <- c("dplyr", "ggplot2",  "kableExtra", "webshot2","magick","knitr","tidyverse",
               "tidyr","ggh4x","GGally","visdat","car","fastDummies","naniar",
-              "rms")
+              "rms","Hmisc","patchwork","forcats")
 # Load or install each
 lapply(packages, load_or_install)
 setwd("~/Library/CloudStorage/Dropbox/School/CU/fall 2025/BIOS 6618 adv biostatistical method/final project/surgery_timing_outcome/")

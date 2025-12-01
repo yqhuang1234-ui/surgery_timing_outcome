@@ -11,6 +11,12 @@ summary(data)
 #############################################################
 # keep age >= 18
 orin_dim <- dim(data)
+# find mort30 for age < 18
+mort_young <- data %>%
+  filter(age < 18) %>%
+  select(mort30)
+cat("30-day mortality for patients age < 18:\n")
+print(table(mort_young$mort30))
 print(paste0("Original data dimensions: ", orin_dim[1], " rows, ", orin_dim[2], " columns"))
 data <- data %>%
   filter(age >= 18)
@@ -330,14 +336,51 @@ data_to_model <- data_clean %>%
   select(-c(procedure_group, ahrq_ccs, "complication","moonphase","dow","month","ccsMort30Rate"))
 str(data_to_model)
 
+# -------------------------
+# 1. CREATE HOUR CATEGORIES
+# -------------------------
+data_to_model$hour_cat <- cut(
+  data_to_model$hour,
+  breaks = c(6, 8, 11, 13, 15, 17, 19),
+  right = FALSE,  # intervals left-inclusive
+  include.lowest = FALSE,
+  labels = c("6-8am", "8-11am", "11-1pm", "1-3pm", "3-5pm", "5-7pm")
+)
+
+# check distribution
+table(data_to_model$hour_cat, useNA = "ifany")
+#return row for na hour_cat
+data_to_model[is.na(data_to_model$hour_cat), ]
+#if hour=19 set it to "5-7"
+data_to_model$hour_cat[is.na(data_to_model$hour_cat) & data_to_model$hour == 19] <- "5-7pm"
+table(data_to_model$hour_cat, useNA = "ifany")
+
+
+
+###################################################
+# save cleaned data for modeling
+###################################################
+#add today's date to file name
+today_date <- format(Sys.Date(), "%Y-%m-%d")
+print(today_date)
+#create directory if not exist
+if (!dir.exists("./data/processed/")) {
+  dir.create("./data/processed/")
+}
+#save data
+filename_without_encode <- paste0(today_date, "_dropna_regroup-procedure_no-encode.rds")
+saveRDS(data_to_model, file = paste0("./data/processed/", filename_without_encode))
+cat("Cleaned data saved for modeling:\n")
+print(paste0("./data/processed/", filename_without_encode))
+
+
 ###################################################
 # descriptive plots for report purposes
 ###################################################
 # Convert continuous to 4 quantile groups for meaningful comparison
-library(dplyr)
-library(Hmisc)
-library(rms)
-
+#rows
+(32001-212-2-8) == nrow(data_to_model)
+names(data_to_model)
 get_uni_prop <- function(df, var) {
   var_sym <- rlang::ensym(var)
   
@@ -363,18 +406,13 @@ data_uni <- data_to_model %>%
   )
 
 # filter vars
-remove_vec <- c("mort30")
+remove_vec <- c("mort30","hour")
 vars <- setdiff(names(data_to_model), remove_vec)
 
 uni_list <- lapply(vars, function(v) get_uni_prop(data_uni, !!sym(v)))
 uni <- bind_rows(uni_list)
 
-library(dplyr)
-library(forcats)
-library(ggplot2)
-library(patchwork)   # install.packages("patchwork") if needed
-
-main_vars <- c("age", "hour", "asa_status", "mortality_rsi",
+main_vars <- c("age", "hour_cat", "asa_status", "mortality_rsi",
                "baseline_charlson", "procedure", "gender")
 
 uni_main <- uni %>% 
@@ -424,9 +462,7 @@ p_base <- ggplot(uni_base, aes(x = mort_rate, y = fct_rev(category))) +
   )
 p_main + p_base + plot_layout(ncol = 2, widths = c(1, 1))
 
-#add today's date to file name
-today_date <- format(Sys.Date(), "%Y-%m-%d")
-print(today_date)
+
 # create figure directory if not exist
 figure_dir <- file.path("results", today_date,'/')
 print(figure_dir)
@@ -436,18 +472,3 @@ if (!dir.exists(figure_dir)) {
 }
 # save figure
 ggsave(paste0(figure_dir, "1_univariable-summary_figure.png"), width=6, height=8, dpi = 300)
-
-
-###################################################
-# save cleaned data for modeling
-###################################################
-
-#create directory if not exist
-if (!dir.exists("./data/processed/")) {
-  dir.create("./data/processed/")
-}
-#save data
-filename_without_encode <- paste0(today_date, "_dropna_regroup-procedure_no-encode.rds")
-saveRDS(data_to_model, file = paste0("./data/processed/", filename_without_encode))
-cat("Cleaned data saved for modeling:\n")
-print(paste0("./data/processed/", filename_without_encode))
