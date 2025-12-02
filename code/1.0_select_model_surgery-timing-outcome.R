@@ -5,8 +5,10 @@
 setwd("~/Dropbox/School/CU/fall 2025/BIOS 6618 adv biostatistical method/final project/surgery_timing_outcome")
 source("./code/0.0_setup_surgery-timing-outcome.R")
 # load processed data
-file_name_asa_factor <- "./data/processed/2025-11-30_dropna_regroup-procedure_no-encode.rds"
+file_name_asa_factor <- "./data/processed/2025-12-01_dropna_regroup-procedure_no-encode.rds"
 data <- readRDS(file_name_asa_factor)
+data$hour_cat <- relevel(data$hour_cat, ref = "8-11am")
+
 
 str(data)
 # check missingness for data
@@ -192,33 +194,41 @@ or_table <- or_table %>%
     clean_term = dplyr::recode(term,
                                
                                # continuous variables  
-                               "age"               = "Age, years",
+                               "age"               = "Age",
                                "mortality_rsi"     = "Risk Stratification Index (30-day mortality)",
                                "baseline_charlson" = "Charlson Comorbidity Index",
                                
                                # gender (binary)
-                               "gender=1" = "Gender = Female (vs Male)",
+                               "gender=1" = "Gender=Female",
                                
                                # ASA levels
-                               "asa_status=2" = "ASA III (vs I–II)",
-                               "asa_status=3" = "ASA IV–VI (vs I–II)",
+                               "asa_status=2" = "ASA status III",
+                               "asa_status=3" = "ASA status IV–VI",
                                
                                # Procedure categories
-                               "procedure=GI"     = "Gastrointestinal & Hernia (vs reference)",
-                               "procedure=Ortho"  = "Orthopedic & Spine (vs reference)",
-                               "procedure=Gyn"    = "Gynecologic (vs reference)",
-                               "procedure=Uro"    = "Urologic (vs reference)",
-                               "procedure=Other"  = "Other Non-Major (vs reference)",
+                               "procedure=GI"     = "Gastrointestinal & Hernia (vs other)",
+                               "procedure=Ortho"  = "Orthopedic & Spine (vs other)",
+                               "procedure=Gyn"    = "Gynecologic (vs other)",
+                               "procedure=Uro"    = "Urologic (vs other)",
+                  
                                
                                # Binary comorbidities (0/1)
-                               "baseline_cancer=1"    = "Cancer: Yes (vs No)",
-                               "baseline_cvd=1"       = "Cardiovascular disease: Yes (vs No)",
-                               "baseline_dementia=1"  = "Dementia: Yes (vs No)",
-                               "baseline_diabetes=1"  = "Diabetes: Yes (vs No)",
-                               "baseline_digestive=1" = "Digestive disease: Yes (vs No)",
-                               "baseline_osteoart=1"  = "Osteoarthritis: Yes (vs No)",
-                               "baseline_psych=1"     = "Psychiatric disorder: Yes (vs No)",
-                               "baseline_pulmonary=1" = "Pulmonary disease: Yes (vs No)",
+                               "baseline_cancer"    = "Cancer",
+                               "baseline_cvd"       = "Cardiovascular/Cerebrovascular disease",
+                               "baseline_dementia"  = "Dementia",
+                               "baseline_diabetes"  = "Diabetes",
+                               "baseline_digestive" = "Digestive disease",
+                               "baseline_osteoart"  = "Osteoarthritis",
+                               "baseline_psych"     = "Psychiatric disorder",
+                               "baseline_pulmonary" = "Pulmonary disease",
+                               
+                               # Hour categories
+                               "hour_cat=8-11am"   = "Surgery Hour 8–11am",
+                               "hour_cat=11-1pm" = "Surgery Hour 11–1pm",
+                               "hour_cat=1-3pm"    = "Surgery Hour 1–3pm",
+                               "hour_cat=3-5pm"    = "Surgery Hour 3–5pm",
+                               "hour_cat=5-7pm"    = "Surgery Hour 5–7pm",
+                               "hour_cat=6-8am"   = "Surgery Hour 6–8am",
                                
                                .default = term    # fallback preserves anything unmapped
     )
@@ -233,7 +243,8 @@ or_table %>%
 # or_table has: term, OR, lower95, upper95, p_value, etc.
 
 plot_df <- or_table %>%
-  filter(term != "Intercept") %>%
+  # remove vector of terms don't want to plot
+  filter(!term %in% c("Intercept","mortality_rsi","mortality_rsi'")) %>%
   filter(!is.na(OR)) %>%
   mutate(
     # numeric p-value
@@ -261,44 +272,177 @@ plot_df <- or_table %>%
   ) %>%
   # sort descending by OR
   arrange(OR) %>%
-  mutate(term = factor(term, levels = term))
+  mutate(clean_term = factor(clean_term, levels = clean_term))
 
-ggplot(plot_df, aes(x = OR, y = term, color = signif_group)) +
+ggplot(plot_df, aes(x = OR, y = clean_term, color = signif_group)) +
   geom_vline(xintercept = 1, linetype = "dashed", color = "grey40") +
   
   geom_errorbarh(aes(xmin = lower95, xmax = upper95), height = 0.15) +
   geom_point(size = 2) +
   
-  # label placed at upper CI bound
   geom_text(
     aes(x = upper95, label = label),
-    hjust = -0.1,
+    hjust = -0.03,
     size = 3
   ) +
   
-  # log OR axis
-  scale_x_log10(expand = expansion(mult = c(0.05, 0.40))) +
+  scale_x_log10(expand = expansion(mult = c(0.05, 0.20))) +
   
   scale_color_manual(
     name = NULL,
     values = c(
-      "Significant (p < 0.05; 95% CI does not include 1)" = "firebrick",
-      "Not significant (p ≥ 0.05 or 95% CI includes 1)" = "grey40"
+      "Significant (p < 0.05; 95% CI does not include 1)" = "#CC3311",  # JAMA red-orange
+      "Not significant (p ≥ 0.05 or 95% CI includes 1)"    = "grey40"
+    ),
+    labels = c("Not significant", "Significant"),
+    breaks = c(
+      "Not significant (p ≥ 0.05 or 95% CI includes 1)",
+      "Significant (p < 0.05; 95% CI does not include 1)"
     )
   ) +
-  guides(color = guide_legend(ncol = 2)) + 
+  
+  guides(color = guide_legend(nrow = 1)) +
+  
   labs(
     x = "Odds ratio (log scale)",
     y = NULL
   ) +
   
-  theme_bw() +
+  theme_light()  +
   theme(
-    panel.grid.minor = element_blank(),
-    axis.text.y = element_text(size = 9),
+    # JAMA = white background, no panel border
+    panel.background = element_rect(fill = "white", color = NA),
+    panel.border = element_blank(),
+    
+    # JAMA: only horizontal gridlines, very subtle
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    panel.grid.major.y = element_line(color = "grey85", linewidth = 0.4),
+    panel.grid.minor.y = element_blank(),
+    
+    # Clean axes
+    axis.line = element_blank(),
+    axis.ticks = element_blank(),
+    axis.title.x = element_text(size = 12, face = "bold"),
+    axis.text = element_text(size = 10, color = "black"),
+    axis.text.y = element_text(size = 10, hjust = 0),
+    
+    # Legend on top, clean
     legend.position = "top",
-    legend.justification = "left"
+    legend.title = element_blank(),
+    legend.text = element_text(size = 9),
+    legend.key = element_blank(),
+    
+    # White plot background, clean margins
+    plot.background = element_rect(fill = "white", color = NA),
+    plot.margin = margin(2, 2, 2, 2)
   )
+
+plot_df <- or_table %>%
+  # remove vector of terms don't want to plot
+  filter(!term %in% c("Intercept","mortality_rsi","mortality_rsi'")) %>%
+  filter(!is.na(OR)) %>%
+  mutate(
+    # numeric p-value
+    p_num = 2 * pnorm(-abs(beta / se)),
+    
+    # significance flag
+    signif = p_num < 0.05 &
+      ((lower95 > 1) | (upper95 < 1)),
+    
+    signif_group = ifelse(
+      signif,
+      "Significant (p < 0.05; 95% CI does not include 1)",
+      "Not significant (p ≥ 0.05 or 95% CI includes 1)"
+    ),
+    
+    # formatted p-value
+    label_p = ifelse(
+      p_num < 0.001, 
+      "p<0.001",
+      paste0("p=", sprintf("%.3f", p_num))
+    ),
+    
+    # text label: ASA IV–VI gets 2 lines, others stay 1 line
+    label = if_else(
+      clean_term == "ASA status IV–VI",
+      paste0(sprintf("%.2f", OR), "\n(", label_p, ")"),
+      paste0(sprintf("%.2f", OR), " (", label_p, ")")
+    )
+  ) %>%
+  arrange(OR) %>%
+  mutate(clean_term = factor(clean_term, levels = clean_term))
+
+plot_df <- plot_df %>%
+  mutate(
+    OR_text = sprintf("%.2f", OR),
+    p_text  = paste0("(", label_p, ")"),
+    v_OR = if_else(clean_term == "ASA status IV–VI",  0.3, 0),
+    v_p  = if_else(clean_term == "ASA status IV–VI", -0.3, 0)
+  )
+
+
+ggplot(plot_df, aes(x = OR, y = clean_term, color = signif_group)) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "grey40") +
+  
+  geom_errorbarh(aes(xmin = lower95, xmax = upper95), height = 0.15) +
+  geom_point(size = 2) +
+  
+  geom_text(
+    aes(x = upper95, label = label),
+    hjust = -0.03,
+    size = 3
+  ) +
+  
+  scale_x_log10(expand = expansion(mult = c(0.05, 0.20))) +
+  
+  scale_color_manual(
+    name = NULL,
+    values = c(
+      "Significant (p < 0.05; 95% CI does not include 1)" = "#CC3311",
+      "Not significant (p ≥ 0.05 or 95% CI includes 1)"    = "grey40"
+    ),
+    labels = c("Not significant", "Significant"),
+    breaks = c(
+      "Not significant (p ≥ 0.05 or 95% CI includes 1)",
+      "Significant (p < 0.05; 95% CI does not include 1)"
+    )
+  ) +
+  
+  guides(color = guide_legend(nrow = 1)) +
+  
+  labs(
+    x = "Odds ratio (log scale)",
+    y = NULL
+  ) +
+  
+  theme_light() +
+  theme(
+    panel.background  = element_rect(fill = "white", color = NA),
+    panel.border      = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    panel.grid.major.y = element_line(color = "grey85", linewidth = 0.4),
+    panel.grid.minor.y = element_blank(),
+    
+    axis.line   = element_blank(),
+    axis.ticks  = element_blank(),
+    # x title no longer bold
+    axis.title.x = element_text(size = 12, face = "plain"),
+    axis.text   = element_text(size = 10, color = "black"),
+    axis.text.y = element_text(size = 10, hjust = 0),
+    
+    legend.position = "top",
+    legend.title    = element_blank(),
+    legend.text     = element_text(size = 9),
+    legend.key      = element_blank(),
+    
+    plot.background = element_rect(fill = "white", color = NA),
+    plot.margin     = margin(2, 2, 2, 2)
+  )
+
+#save figure
+ggsave(paste0(figure_dir, "2_final-model-OR-figure.png"), width=5.6, height=5.5, dpi = 500)
 
 # effect plot
 # plot unadjusted and adjusted effects of hour on mortality showing two lines
@@ -312,41 +456,108 @@ p1 <- as.data.frame(Predict(fit_unadjusted, hour_cat, fun = plogis)) %>%
 p2 <- as.data.frame(Predict(fit_final_basic, hour_cat, fun = plogis)) %>%
   mutate(model = "Adjusted")
 
-combined <- bind_rows(p1, p2)
+combined_plot <- bind_rows(p1, p2)
+combined_plot$hour_cat_plot <- factor(
+  combined_plot$hour_cat,
+  levels = c("6-8am", "8-11am", "11-1pm", "1-3pm", "3-5pm", "5-7pm")
+)
+library(scales)  # for label_percent()
 
 # Ensure hour_cat is a factor in the combined data too
 
 ggplot(
-  combined,
-  aes(x = hour_cat, y = yhat, color = model, group = model)
+  combined_plot,
+  aes(x = hour_cat_plot, y = yhat, color = model, group = model)
 ) +
-  geom_line(aes(group = model), size = 1.2) +
+  # 95% CI ribbons
   geom_ribbon(
-    aes(ymin = lower, ymax = upper, fill = model, group = model),
-    alpha = 0.2,
+    aes(ymin = lower, ymax = upper, fill = model),
+    alpha = 0.20,
     color = NA
   ) +
+  # Lines for predicted probabilities
+  geom_line(size = 1.3) +
+  
   labs(
-    x = "Surgery Hour Category",
-    y = "Predicted 30-day Mortality Probability"
+    x = "Surgery hour category",
+    y = "Predicted 30-day mortality (%)"
+  ) +
+  
+  # Colors for unadjusted vs adjusted
+  scale_color_manual(
+    name = NULL,
+    values = c(
+      "Unadjusted" = "#0BA6DF",
+      "Adjusted"   = "#CC3311"
+    )
+  ) +
+  scale_fill_manual(
+    name = NULL,
+    values = c(
+      "Unadjusted" = "#0BA6DF",
+      "Adjusted"   = "#CC3311"
+    )
+  ) +
+  
+  # Show y-axis as percentages (but keep underlying data as probabilities)
+  scale_y_continuous(
+    labels = label_percent(accuracy = 0.01),  # e.g. 0.45%
+    expand = expansion(mult = c(0, 0.05))
+  ) +
+  
+  # JAMA-ish theme
+  theme_bw() +
+  theme(
+    panel.background   = element_rect(fill = "white", color = NA),
+    panel.border       = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    panel.grid.minor.y = element_blank(),
+    panel.grid.major.y = element_line(color = "grey85", linewidth = 0.4),
+    
+    axis.line    = element_blank(),
+    axis.ticks   = element_blank(),
+    axis.title.x = element_text(size = 12, face = "bold"),
+    axis.title.y = element_text(size = 12),
+    axis.text.x  = element_text(size = 10),
+    axis.text.y  = element_text(size = 10),
+    
+    legend.position = "top",
+    legend.title    = element_blank(),
+    legend.key      = element_blank(),
+    legend.text     = element_text(size = 10),
+    
+    plot.background = element_rect(fill = "white", color = NA),
+    plot.margin     = margin(5, 5, 5, 5)
+  )
+#1A4E99
+# save figure
+ggsave(paste0(figure_dir, "2_hour-effect-compare-figure.png"), width=5, height=4, dpi = 500)
+
+#effect plot mortality_rsi
+df_rsi <- as.data.frame(
+  Predict(fit_final_basic, mortality_rsi, fun = plogis)
+) %>%
+  mutate(
+    mort_pct = yhat * 100,
+    lower_pct = lower * 100,
+    upper_pct = upper * 100
+  )
+
+ggplot(df_rsi, aes(x = mortality_rsi, y = mort_pct)) +
+  geom_line(size = 1.2, color = "#0BA6DF") +
+  geom_ribbon(aes(ymin = lower_pct, ymax = upper_pct),
+              alpha = 0.20, fill = "#0BA6DF") +
+  labs(
+    x = "Risk Stratification Index (30-day Mortality)",
+    y = "Predicted 30-day Mortality (%)"
   ) +
   theme_bw() +
   theme(
-    legend.position = "top",
-    legend.title = element_blank()   # remove legend title
+    panel.grid.minor = element_blank(),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 10)
   )
-scale_color_manual(values = c("Unadjusted" = "red", "Adjusted" = "blue")) +
-  scale_fill_manual(values = c("Unadjusted" = "red", "Adjusted" = "blue"))
 
-#effect plot mortality_rsi
-ggplot(as.data.frame(Predict(fit_final_basic, mortality_rsi, fun=plogis)), 
-       aes(x = mortality_rsi, y = yhat)) +
-  geom_line(size=1.2, color="blue") +
-  geom_ribbon(aes(ymin=lower, ymax=upper), alpha=0.2, fill="blue") +
-  labs(
-    x = "Risk Stratification Index (30-day Mortality)",
-    y = "Predicted 30-day Mortality Probability"
-  ) +
-  theme_bw()
 # save figure
-ggsave(paste0(figure_dir, "2_mortality-rsi-effect_figure.png"), width=4, height=4, dpi = 300)
+ggsave(paste0(figure_dir, "2_mortality-rsi-effect_figure.png"), width=4, height=3, dpi = 400)

@@ -497,12 +497,22 @@ tbl_baseline <-
 ##    (wide but not too tall)
 ## --------------------------------------------------
 
-gt_tbl <-
-  as_gt(tbl_baseline) %>%
+gt_tbl <- as_gt(tbl_baseline) %>%
+  gt::tab_style(
+    style = gt::cell_fill(color = "#f7f7ec"),
+    locations = gt::cells_body()
+  ) %>%
+  gt::tab_style(
+    style = gt::cell_fill(color = "#f7f7ec"),
+    locations = gt::cells_column_labels()
+  ) %>%
+  gt::opt_row_striping(
+    row_striping = TRUE
+  ) %>%
   gt::tab_options(
-    table.font.size   = 9,           # smaller font
-    data_row.padding  = px(1),       # tighten row spacing
-    heading.padding   = px(2)
+    table.font.size = 9,
+    data_row.padding = gt::px(1),
+    heading.padding = gt::px(2)
   )
 gt_tbl
 
