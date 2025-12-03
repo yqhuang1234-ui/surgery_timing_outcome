@@ -23,8 +23,8 @@ dim(data)
 #################################
 # set up
 vars_spline <- c("age", "mortality_rsi")
-var_exporsure <- "hour"
-var_exporsure_cat <- "hour_cat"
+var_exposure <- "hour"
+var_exposure_cat <- "hour_cat"
 var_outcome <- "mort30"
 dd <- datadist(data)
 options(datadist = "dd")
@@ -32,7 +32,7 @@ options(datadist = "dd")
 # automatically define other covariates
 other_covariates <- setdiff(
   names(data),
-  c(var_outcome, var_exporsure, vars_spline, var_exporsure_cat)
+  c(var_outcome, var_exposure, vars_spline, var_exposure_cat)
 )
 print(other_covariates)
 print(length(other_covariates))
@@ -239,105 +239,6 @@ or_table <- or_table %>%
 or_table %>%
   filter(p_value != "<0.001" & p_value < 0.05 | p_value == "<0.001")
 
-# 1. Start from your existing or_table
-# or_table has: term, OR, lower95, upper95, p_value, etc.
-
-plot_df <- or_table %>%
-  # remove vector of terms don't want to plot
-  filter(!term %in% c("Intercept","mortality_rsi","mortality_rsi'")) %>%
-  filter(!is.na(OR)) %>%
-  mutate(
-    # numeric p-value
-    p_num = 2 * pnorm(-abs(beta / se)),
-    
-    # significance flag
-    signif = p_num < 0.05 &
-      ((lower95 > 1) | (upper95 < 1)),
-    
-    signif_group = ifelse(
-      signif,
-      "Significant (p < 0.05; 95% CI does not include 1)",
-      "Not significant (p ≥ 0.05 or 95% CI includes 1)"
-    ),
-    
-    # format p-value
-    label_p = ifelse(
-      p_num < 0.001, 
-      "p<0.001",
-      paste0("p=", sprintf("%.3f", p_num))
-    ),
-    
-    # text label for OR
-    label = paste0(sprintf("%.2f", OR), " (", label_p, ")")
-  ) %>%
-  # sort descending by OR
-  arrange(OR) %>%
-  mutate(clean_term = factor(clean_term, levels = clean_term))
-
-ggplot(plot_df, aes(x = OR, y = clean_term, color = signif_group)) +
-  geom_vline(xintercept = 1, linetype = "dashed", color = "grey40") +
-  
-  geom_errorbarh(aes(xmin = lower95, xmax = upper95), height = 0.15) +
-  geom_point(size = 2) +
-  
-  geom_text(
-    aes(x = upper95, label = label),
-    hjust = -0.03,
-    size = 3
-  ) +
-  
-  scale_x_log10(expand = expansion(mult = c(0.05, 0.20))) +
-  
-  scale_color_manual(
-    name = NULL,
-    values = c(
-      "Significant (p < 0.05; 95% CI does not include 1)" = "#CC3311",  # JAMA red-orange
-      "Not significant (p ≥ 0.05 or 95% CI includes 1)"    = "grey40"
-    ),
-    labels = c("Not significant", "Significant"),
-    breaks = c(
-      "Not significant (p ≥ 0.05 or 95% CI includes 1)",
-      "Significant (p < 0.05; 95% CI does not include 1)"
-    )
-  ) +
-  
-  guides(color = guide_legend(nrow = 1)) +
-  
-  labs(
-    x = "Odds ratio (log scale)",
-    y = NULL
-  ) +
-  
-  theme_light()  +
-  theme(
-    # JAMA = white background, no panel border
-    panel.background = element_rect(fill = "white", color = NA),
-    panel.border = element_blank(),
-    
-    # JAMA: only horizontal gridlines, very subtle
-    panel.grid.major.x = element_blank(),
-    panel.grid.minor.x = element_blank(),
-    panel.grid.major.y = element_line(color = "grey85", linewidth = 0.4),
-    panel.grid.minor.y = element_blank(),
-    
-    # Clean axes
-    axis.line = element_blank(),
-    axis.ticks = element_blank(),
-    axis.title.x = element_text(size = 12, face = "bold"),
-    axis.text = element_text(size = 10, color = "black"),
-    axis.text.y = element_text(size = 10, hjust = 0),
-    
-    # Legend on top, clean
-    legend.position = "top",
-    legend.title = element_blank(),
-    legend.text = element_text(size = 9),
-    legend.key = element_blank(),
-    
-    # White plot background, clean margins
-    plot.background = element_rect(fill = "white", color = NA),
-    plot.margin = margin(2, 2, 2, 2)
-  )
-
 plot_df <- or_table %>%
   # remove vector of terms don't want to plot
   filter(!term %in% c("Intercept","mortality_rsi","mortality_rsi'")) %>%
@@ -442,7 +343,7 @@ ggplot(plot_df, aes(x = OR, y = clean_term, color = signif_group)) +
   )
 
 #save figure
-ggsave(paste0(figure_dir, "2_final-model-OR-figure.png"), width=5.6, height=5.5, dpi = 500)
+ggsave(paste0(figure_dir, "2_final-model-OR-figure.png"), width=5.6, height=5.5, dpi = 600)
 
 # effect plot
 # plot unadjusted and adjusted effects of hour on mortality showing two lines
@@ -517,7 +418,7 @@ ggplot(
     
     axis.line    = element_blank(),
     axis.ticks   = element_blank(),
-    axis.title.x = element_text(size = 12, face = "bold"),
+    axis.title.x = element_text(size = 12),
     axis.title.y = element_text(size = 12),
     axis.text.x  = element_text(size = 10),
     axis.text.y  = element_text(size = 10),
@@ -532,7 +433,7 @@ ggplot(
   )
 #1A4E99
 # save figure
-ggsave(paste0(figure_dir, "2_hour-effect-compare-figure.png"), width=5, height=4, dpi = 500)
+ggsave(paste0(figure_dir, "2_hour-effect-compare-figure.png"), width=5, height=4, dpi = 600)
 
 #effect plot mortality_rsi
 df_rsi <- as.data.frame(
@@ -560,4 +461,4 @@ ggplot(df_rsi, aes(x = mortality_rsi, y = mort_pct)) +
   )
 
 # save figure
-ggsave(paste0(figure_dir, "2_mortality-rsi-effect_figure.png"), width=4, height=3, dpi = 400)
+ggsave(paste0(figure_dir, "2_mortality-rsi-effect_figure.png"), width=4, height=3, dpi = 600)

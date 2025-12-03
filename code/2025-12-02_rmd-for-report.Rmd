@@ -1,7 +1,106 @@
+---
+title: "Code Appendix"
+output: pdf_document
+date: "2025-12-03"
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,      # show code
+  results = "hide", # hide printed output
+  message = FALSE,  # hide messages
+  warning = FALSE,  # hide warnings
+  fig.show = "hide" # hide plots
+)
+```
+
+```{r install, echo=TRUE}
+## ================================
+## 0. Load needed packages and data
+## ================================
 # set up the environment
 setwd("~/Dropbox/School/CU/fall 2025/BIOS 6618 adv biostatistical method/final project/surgery_timing_outcome")
-source("./code/0.0_setup_surgery-timing-outcome.R")
+# Helper function: install if not already available
+load_or_install <- function(pkg){
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    install.packages(pkg)
+  }
+  library(pkg, character.only = TRUE)
+}
 
+# List of needed packages
+packages <- c("dplyr", "ggplot2",  "kableExtra", "webshot2","magick","knitr","tidyverse",
+              "tidyr","ggh4x","GGally","visdat","car","fastDummies","naniar",
+              "rms","Hmisc","patchwork","forcats","xfun","gtsummary","gt")
+# Load or install each
+lapply(packages, load_or_install)
+data <- read.csv("./data/Surgery_Timing.csv")
+
+############################################################
+## 1. Define variable groups (by role & type)
+############################################################
+
+# Primary exposure & outcomes
+var_exposure   <- "hour"
+var_outcome   <- "mort30"
+
+# Comorbidity indicators (0/1)
+vars_comorbidity <- c(
+  "baseline_cancer",
+  "baseline_cvd",
+  "baseline_dementia",
+  "baseline_diabetes",
+  "baseline_digestive",
+  "baseline_osteoart",
+  "baseline_psych",
+  "baseline_pulmonary"
+)
+
+# Continuous numeric variables for EDA
+vars_continuous <- c(
+  "age",
+  "bmi",
+  "baseline_charlson",
+  "mortality_rsi",
+  "complication_rsi",
+  "ccsMort30Rate",
+  "ccsComplicationRate",
+  "hour"
+)
+
+# Binary variables (0/1)
+vars_binary <- c(
+  vars_comorbidity,
+  var_outcome
+)
+
+# Categorical variables
+vars_categorical <- c(
+  "gender",
+  "race",
+  "asa_status",
+  "ahrq_ccs",
+  "dow",
+  "month",
+  "moonphase"
+)
+n_cols <- ncol(data)
+print(length(vars_categorical) + length(vars_binary) + length(vars_continuous) == n_cols)  # should equal ncol(data)
+vars_categorical_binary <- c(vars_categorical, vars_binary)
+############################################################
+## 2. Type conversion
+############################################################
+
+data <- data %>%
+  # Convert binary variables to factors
+  mutate(across(all_of(vars_binary), ~ as.numeric(.))) %>%
+  # Convert categorical variables to factors
+  mutate(across(all_of(vars_categorical), ~ as.factor(.))) %>%
+  # convert continuous variables to numeric
+  mutate(across(all_of(vars_continuous), ~ as.numeric(.))
+  )
+```
+
+```{r process_data, echo=TRUE}
 cat("=== Structure ===\n")
 str(data)
 summary(data)
@@ -13,8 +112,8 @@ summary(data)
 orin_dim <- dim(data)
 # find mort30 for age < 18
 mort_young <- data %>%
-  filter(age < 18) %>%
-  select(mort30)
+  dplyr::filter(age < 18) %>%
+  dplyr::select(mort30)
 cat("30-day mortality for patients age < 18:\n")
 print(table(mort_young$mort30))
 print(paste0("Original data dimensions: ", orin_dim[1], " rows, ", orin_dim[2], " columns"))
@@ -33,7 +132,7 @@ summary(data$age)
 #############################################################
 # calculate vif for continuous variables
 vif_data <- data %>%
-  select(all_of(c(vars_continuous, "mort30"))) %>%
+  dplyr::select(all_of(c(vars_continuous, "mort30"))) %>%
   na.omit()
 vif_model <- lm(mort30 ~ ., data = vif_data)
 vif_values <- vif(vif_model)
@@ -50,7 +149,7 @@ print(high_vif_vars)
 
 # calculate correlation matrix for continuous variables
 cor_data <- data %>%
-  select(all_of(vars_continuous)) %>%
+  dplyr::select(all_of(vars_continuous)) %>%
   na.omit()
 cor_matrix <- cor(cor_data)
 print(cor_matrix)
@@ -142,7 +241,7 @@ cat("Variables to drop due to  high correlation or high missingness:\n")
 print(vars_to_drop)
 data_clean <- data %>%
   drop_na(all_of(vars_to_check)) %>%
-  select(-all_of(vars_to_drop))
+  dplyr::select(-all_of(vars_to_drop))
 cat("Data dimensions after dropping missing values in key variables and unnecessary variables:\n")
 print(dim(data_clean))
 print(length(vars_to_drop))
@@ -333,11 +432,11 @@ data_clean <- data_clean %>%
   )
 # drop original procedure_group and ahrq_ccs
 data_to_model <- data_clean %>%
-  select(-c(procedure_group, ahrq_ccs, "complication","moonphase","dow","month","ccsMort30Rate"))
+  dplyr::select(-c(procedure_group, ahrq_ccs, "complication","moonphase","dow","month","ccsMort30Rate"))
 str(data_to_model)
 
 # -------------------------
-# 1. CREATE HOUR CATEGORIES
+# CREATE HOUR CATEGORIES
 # -------------------------
 data_to_model$hour_cat <- cut(
   data_to_model$hour,
@@ -355,33 +454,9 @@ data_to_model[is.na(data_to_model$hour_cat), ]
 data_to_model$hour_cat[is.na(data_to_model$hour_cat) & data_to_model$hour == 19] <- "5-7pm"
 table(data_to_model$hour_cat, useNA = "ifany")
 
-
-
-###################################################
-# save cleaned data for modeling
-###################################################
-#add today's date to file name
-today_date <- format(Sys.Date(), "%Y-%m-%d")
-print(today_date)
-#create directory if not exist
-if (!dir.exists("./data/processed/")) {
-  dir.create("./data/processed/")
-}
-#save data
-filename_without_encode <- paste0(today_date, "_dropna_regroup-procedure_no-encode.rds")
-saveRDS(data_to_model, file = paste0("./data/processed/", filename_without_encode))
-cat("Cleaned data saved for modeling:\n")
-print(paste0("./data/processed/", filename_without_encode))
-
-
-# baseline characteristics summaries between hour group
-# create figure directory if not exist
-figure_dir <- file.path("results", today_date,'/')
-print(figure_dir)
-
-if (!dir.exists(figure_dir)) {
-  dir.create(figure_dir, recursive = TRUE)
-}
+################################################
+# Plot baseline characteristics table
+################################################
 ## --------------------------------------------------
 ## 0. Pre-processing: factors, labels, 0/1 → No/Yes
 ## --------------------------------------------------
@@ -448,7 +523,7 @@ var_order
 
 tbl_baseline <-
   data_to_plot %>%
-  select(hour_cat, all_of(var_order)) %>%
+  dplyr::select(hour_cat, all_of(var_order)) %>%
   tbl_summary(
     by = hour_cat,
     statistic = list(
@@ -515,107 +590,408 @@ gt_tbl <- as_gt(tbl_baseline) %>%
     heading.padding = gt::px(2)
   )
 gt_tbl
+```
 
-gtsave(
-  gt_tbl,
-  filename = paste0(figure_dir, "1_baseline-hour-group-summary_table.png"),
-  vwidth  = 2400,  # pixels: wide
-  vheight = 700,   # pixels: relatively short
-  zoom=6
+
+```{r modeling, echo=TRUE}
+##################################################
+#Modeling code here
+##################################################
+#################################
+#load data
+#################################
+data <- data_to_model
+data$hour_cat <- relevel(data$hour_cat, ref = "8-11am")
+str(data)
+# check missingness for data
+miss_summary <- naniar::miss_var_summary(data)
+print(miss_summary)
+names(data)
+dim(data)
+
+#################################
+# build models
+#################################
+# set up
+vars_spline <- c("age", "mortality_rsi")
+var_exposure_cat <- "hour_cat"
+dd <- datadist(data)
+options(datadist = "dd")
+
+# automatically define other covariates
+other_covariates <- setdiff(
+  names(data),
+  c(var_outcome, var_exposure, vars_spline, var_exposure_cat)
+)
+print(other_covariates)
+print(length(other_covariates))
+
+# construct base rhs
+base_rhs <- paste(
+  "rcs(age, K) + rcs(mortality_rsi, K) + rcs(hour, K)",
+  if (length(other_covariates) > 0)
+    paste("+", paste(other_covariates, collapse = " + "))
+  else ""
 )
 
-# extract p-values table
-sig_vars <- tbl_baseline$table_body %>%
-  select(variable, p.value) %>%        # these columns DO exist in table_body
-  filter(!is.na(p.value), p.value < 0.05)
+# fit models with different K
+fit_k <- list()
+AIC_k <- numeric()
 
-sig_vars
-
-# Convert continuous to 4 quantile groups for meaningful comparison
-#rows
-(32001-212-2-8) == nrow(data_to_model)
-names(data_to_model)
-get_uni_prop <- function(df, var) {
-  var_sym <- rlang::ensym(var)
-  
-  df %>%
-    group_by(!!var_sym) %>%
-    summarise(
-      mort_rate = mean(mort30),
-      n = n(),
-      .groups = "drop"
-    ) %>%
-    mutate(
-      variable = rlang::as_string(var_sym),
-      category = as.character(!!var_sym)
+for (K in c(0, 3, 4,5)) {
+  if (K == 0) {
+    # k = 0 = linear model: no rcs(), just linear terms
+    f <- lrm(
+      as.formula(
+        paste("mort30 ~ age + mortality_rsi + hour",
+              if (length(other_covariates) > 0)
+                paste("+", paste(other_covariates, collapse = " + "))
+              else "")
+      ),
+      data = data
     )
+  } else {
+    f <- lrm(
+      as.formula(paste("mort30 ~", gsub("K", K, base_rhs))),
+      data = data
+    )
+  }
+  fit_k[[as.character(K)]] <- f
+  AIC_k[as.character(K)] <- round(AIC(f),0)
 }
 
-data_uni <- data_to_model %>%
+AIC_k
+# choose the k with lowest AIC
+best_k <- as.numeric(names(which.min(AIC_k)))
+print(paste("Best K:", best_k))
+best_model <- fit_k[[as.character(best_k)]]
+
+# within best k, check which variables are truely nonlinear
+#if nonlinear has small p keep spline, if p large change to linear
+anova(best_model)
+
+# -------------------------
+# FIT MODEL WITH HOUR AS CATEGORICAL VARIABLE
+# -------------------------
+final_model_rhs <- as.formula(
+  paste("mort30 ~ age + rcs(mortality_rsi,3) + hour_cat",
+        if (length(other_covariates) > 0)
+          paste("+", paste(other_covariates, collapse = " + "))
+        else "")
+)
+fit_final_basic <- lrm(
+  final_model_rhs,
+  data = data
+)
+anova(fit_final_basic)
+
+#check AIC for all models
+c(
+  AIC_k,
+  final=round(AIC(fit_final_basic),0)
+)
+
+# unadjusted effect of hour
+fit_unadjusted <- lrm(
+  mort30 ~ hour_cat,
+  data = data
+)
+
+
+###################################################
+# plots for report purposes
+###################################################
+# this object contains coeffients, se, z statistic, wald p-values, confidence intervals
+## 1) Coefficients (betas)
+co <- coef(fit_final_basic)
+
+## 2) Variance–covariance matrix and SEs
+vc <- vcov(fit_final_basic)
+se <- sqrt(diag(vc))
+
+## 3) Wald Z-statistics and p-values
+z  <- co / se
+p  <- 2 * pnorm(-abs(z))
+
+## 4) Wald 95% CI for betas
+ci_beta <- confint.default(fit_final_basic)  # works for lrm objects
+
+# -------------- VARIABLE LABELS & LEVEL LABELS -------------------
+
+## 5) Put everything together on OR scale
+options(scipen = 999)   # prevents scientific notation
+or_table <- data.frame(
+  term    = names(co),
+  beta    = round(co, 3),
+  se      = round(se, 3),
+  z       = round(z, 3),
+  p_value = ifelse(p < 0.001, "<0.001", round(p, 3)),
+  OR      = round(exp(co), 2),
+  lower95 = round(exp(ci_beta[, 1]), 2),
+  upper95 = round(exp(ci_beta[, 2]), 2),
+  row.names = NULL,
+  check.names = FALSE
+)
+or_table <- or_table %>%
   mutate(
-    age = cut2(age, g = 4),
-    mortality_rsi = cut2(mortality_rsi, g = 4),
-    hour = cut2(hour, g = 4),
-    baseline_charlson = cut2(baseline_charlson, g = 4)
+    clean_term = dplyr::recode(term,
+                               
+                               # continuous variables  
+                               "age"               = "Age",
+                               "mortality_rsi"     = "Risk Stratification Index (30-day mortality)",
+                               "baseline_charlson" = "Charlson Comorbidity Index",
+                               
+                               # gender (binary)
+                               "gender=1" = "Gender=Female",
+                               
+                               # ASA levels
+                               "asa_status=2" = "ASA status III",
+                               "asa_status=3" = "ASA status IV–VI",
+                               
+                               # Procedure categories
+                               "procedure=GI"     = "Gastrointestinal & Hernia (vs other)",
+                               "procedure=Ortho"  = "Orthopedic & Spine (vs other)",
+                               "procedure=Gyn"    = "Gynecologic (vs other)",
+                               "procedure=Uro"    = "Urologic (vs other)",
+                  
+                               
+                               # Binary comorbidities (0/1)
+                               "baseline_cancer"    = "Cancer",
+                               "baseline_cvd"       = "Cardiovascular/Cerebrovascular disease",
+                               "baseline_dementia"  = "Dementia",
+                               "baseline_diabetes"  = "Diabetes",
+                               "baseline_digestive" = "Digestive disease",
+                               "baseline_osteoart"  = "Osteoarthritis",
+                               "baseline_psych"     = "Psychiatric disorder",
+                               "baseline_pulmonary" = "Pulmonary disease",
+                               
+                               # Hour categories
+                               "hour_cat=8-11am"   = "Surgery Hour 8–11am",
+                               "hour_cat=11-1pm" = "Surgery Hour 11–1pm",
+                               "hour_cat=1-3pm"    = "Surgery Hour 1–3pm",
+                               "hour_cat=3-5pm"    = "Surgery Hour 3–5pm",
+                               "hour_cat=5-7pm"    = "Surgery Hour 5–7pm",
+                               "hour_cat=6-8am"   = "Surgery Hour 6–8am",
+                               
+                               .default = term    # fallback preserves anything unmapped
+    )
   )
 
-# filter vars
-remove_vec <- c("mort30","hour")
-vars <- setdiff(names(data_to_model), remove_vec)
 
-uni_list <- lapply(vars, function(v) get_uni_prop(data_uni, !!sym(v)))
-uni <- bind_rows(uni_list)
+#significant variables at alpha = 0.05
+or_table %>%
+  filter(p_value != "<0.001" & p_value < 0.05 | p_value == "<0.001")
 
-main_vars <- c("age", "hour_cat", "asa_status", "mortality_rsi",
-               "baseline_charlson", "procedure", "gender")
+# 1. Start from your existing or_table
+# or_table has: term, OR, lower95, upper95, p_value, etc.
 
-uni_main <- uni %>% 
-  filter(variable %in% main_vars) %>%
-  mutate(variable = factor(variable, levels = main_vars))
+plot_df <- or_table %>%
+  # remove vector of terms don't want to plot
+  filter(!term %in% c("Intercept","mortality_rsi","mortality_rsi'")) %>%
+  filter(!is.na(OR)) %>%
+  mutate(
+    # numeric p-value
+    p_num = 2 * pnorm(-abs(beta / se)),
+    
+    # significance flag
+    signif = p_num < 0.05 &
+      ((lower95 > 1) | (upper95 < 1)),
+    
+    signif_group = ifelse(
+      signif,
+      "Significant",
+      "Not significant"
+    ),
+    
+    # formatted p-value
+    label_p = ifelse(
+      p_num < 0.001, 
+      "p<0.001",
+      paste0("p=", sprintf("%.3f", p_num))
+    ),
+    
+    # text label: ASA IV–VI gets 2 lines, others stay 1 line
+    label = if_else(
+      clean_term == "ASA status IV–VI",
+      paste0(sprintf("%.2f", OR), "\n(", label_p, ")"),
+      paste0(sprintf("%.2f", OR), " (", label_p, ")")
+    )
+  ) %>%
+  arrange(OR) %>%
+  mutate(clean_term = factor(clean_term, levels = clean_term))
 
-uni_base <- uni %>% 
-  filter(!variable %in% main_vars) %>%
-  mutate(variable = factor(variable, levels = sort(unique(variable))))
-xmax <- max(uni$mort_rate, na.rm = TRUE)
-p_main <- ggplot(uni_main, aes(x = mort_rate, y = fct_rev(category))) +
-  geom_point(size = 2, alpha = 0.9) +
-  facet_wrap(~ variable, scales = "free_y", ncol = 1, strip.position = "top") +
-  scale_x_continuous(limits = c(0, xmax)) + 
-  labs(
-    x = "30-day Mortality Proportion",
-    y = NULL,
-    title = "Univariable Summaries of 30-day Mortality"
+plot_df <- plot_df %>%
+  mutate(
+    OR_text = sprintf("%.2f", OR),
+    p_text  = paste0("(", label_p, ")"),
+    v_OR = if_else(clean_term == "ASA status IV–VI",  0.3, 0),
+    v_p  = if_else(clean_term == "ASA status IV–VI", -0.3, 0)
+  )
+
+
+ggplot(plot_df, aes(x = OR, y = clean_term, color = signif_group)) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "grey40") +
+  
+  geom_errorbarh(aes(xmin = lower95, xmax = upper95), height = 0.15) +
+  geom_point(size = 2) +
+  
+  geom_text(
+    aes(x = upper95, label = label),
+    hjust = -0.03,
+    size = 3
   ) +
-  theme_bw(base_size = 12) +
-  theme(
-    strip.text = element_text(size = 12, face = "bold"),
-    axis.text.y = element_text(size = 10),
-    axis.text.x = element_text(size = 10),
-    panel.grid.major.y = element_blank(),
-    panel.grid.minor = element_blank(),
-    panel.spacing = unit(0.5, "lines"),
-    plot.title = element_text(face = "bold", size = 16, hjust = 0.5)
-  )
-p_base <- ggplot(uni_base, aes(x = mort_rate, y = fct_rev(category))) +
-  geom_point(size = 2, alpha = 0.9) +
-  facet_wrap(~ variable, scales = "free_y", ncol = 1, strip.position = "top") +
-  scale_x_continuous(limits = c(0, xmax)) + 
+  
+  scale_x_log10(expand = expansion(mult = c(0.05, 0.20))) +
+  
+  scale_color_manual(
+    name = NULL,
+    values = c(
+      "Significant" = "#CC3311",
+      "Not significant"    = "grey40"
+    ),
+    labels = c("Not significant", "Significant"),
+    breaks = c(
+      "Not significant",
+      "Significant"
+    )
+  ) +
+  
+  guides(color = guide_legend(nrow = 1)) +
+  
   labs(
-    x = "30-day Mortality Proportion",
+    x = "Odds ratio (log scale)",
     y = NULL
   ) +
-  theme_bw(base_size = 12) +
+  
+  theme_light() +
   theme(
-    strip.text = element_text(size = 12, face = "bold"),
-    axis.text.y = element_text(size = 10),
-    axis.text.x = element_text(size = 10),
-    panel.grid.major.y = element_blank(),
-    panel.grid.minor = element_blank(),
-    panel.spacing = unit(0.5, "lines"),
-    plot.title = element_blank()
+    panel.background  = element_rect(fill = "white", color = NA),
+    panel.border      = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    panel.grid.major.y = element_line(color = "grey85", linewidth = 0.4),
+    panel.grid.minor.y = element_blank(),
+    
+    axis.line   = element_blank(),
+    axis.ticks  = element_blank(),
+    # x title no longer bold
+    axis.title.x = element_text(size = 12, face = "plain"),
+    axis.text   = element_text(size = 10, color = "black"),
+    axis.text.y = element_text(size = 10, hjust = 0),
+    
+    legend.position = "top",
+    legend.title    = element_blank(),
+    legend.text     = element_text(size = 9),
+    legend.key      = element_blank(),
+    
+    plot.background = element_rect(fill = "white", color = NA),
+    plot.margin     = margin(2, 2, 2, 2)
   )
-p_main + p_base + plot_layout(ncol = 2, widths = c(1, 1))
 
+# Get predictions for unadjusted and adjusted models
+p1 <- as.data.frame(Predict(fit_unadjusted, hour_cat, fun = plogis)) %>%
+  mutate(model = "Unadjusted")
 
-# save figure
-ggsave(paste0(figure_dir, "1_univariable-summary_figure.png"), width=6, height=8, dpi = 300)
+p2 <- as.data.frame(Predict(fit_final_basic, hour_cat, fun = plogis)) %>%
+  mutate(model = "Adjusted")
+
+combined_plot <- bind_rows(p1, p2)
+combined_plot$hour_cat_plot <- factor(
+  combined_plot$hour_cat,
+  levels = c("6-8am", "8-11am", "11-1pm", "1-3pm", "3-5pm", "5-7pm")
+)
+library(scales)  # for label_percent()
+
+# Ensure hour_cat is a factor in the combined data too
+
+ggplot(
+  combined_plot,
+  aes(x = hour_cat_plot, y = yhat, color = model, group = model)
+) +
+  # 95% CI ribbons
+  geom_ribbon(
+    aes(ymin = lower, ymax = upper, fill = model),
+    alpha = 0.20,
+    color = NA
+  ) +
+  # Lines for predicted probabilities
+  geom_line(size = 1.3) +
+  
+  labs(
+    x = "Surgery hour category",
+    y = "Predicted 30-day mortality (%)"
+  ) +
+  
+  # Colors for unadjusted vs adjusted
+  scale_color_manual(
+    name = NULL,
+    values = c(
+      "Unadjusted" = "#0BA6DF",
+      "Adjusted"   = "#CC3311"
+    )
+  ) +
+  scale_fill_manual(
+    name = NULL,
+    values = c(
+      "Unadjusted" = "#0BA6DF",
+      "Adjusted"   = "#CC3311"
+    )
+  ) +
+  
+  # Show y-axis as percentages (but keep underlying data as probabilities)
+  scale_y_continuous(
+    labels = label_percent(accuracy = 0.01),  # e.g. 0.45%
+    expand = expansion(mult = c(0, 0.05))
+  ) +
+  
+  # JAMA-ish theme
+  theme_bw() +
+  theme(
+    panel.background   = element_rect(fill = "white", color = NA),
+    panel.border       = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    panel.grid.minor.y = element_blank(),
+    panel.grid.major.y = element_line(color = "grey85", linewidth = 0.4),
+    
+    axis.line    = element_blank(),
+    axis.ticks   = element_blank(),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    axis.text.x  = element_text(size = 10),
+    axis.text.y  = element_text(size = 10),
+    
+    legend.position = "top",
+    legend.title    = element_blank(),
+    legend.key      = element_blank(),
+    legend.text     = element_text(size = 10),
+    
+    plot.background = element_rect(fill = "white", color = NA),
+    plot.margin     = margin(5, 5, 5, 5)
+  )
+
+#effect plot mortality_rsi
+df_rsi <- as.data.frame(
+  Predict(fit_final_basic, mortality_rsi, fun = plogis)
+) %>%
+  mutate(
+    mort_pct = yhat * 100,
+    lower_pct = lower * 100,
+    upper_pct = upper * 100
+  )
+
+ggplot(df_rsi, aes(x = mortality_rsi, y = mort_pct)) +
+  geom_line(size = 1.2, color = "#0BA6DF") +
+  geom_ribbon(aes(ymin = lower_pct, ymax = upper_pct),
+              alpha = 0.20, fill = "#0BA6DF") +
+  labs(
+    x = "Risk Stratification Index (30-day Mortality)",
+    y = "Predicted 30-day Mortality (%)"
+  ) +
+  theme_bw() +
+  theme(
+    panel.grid.minor = element_blank(),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 10)
+  )
+```
