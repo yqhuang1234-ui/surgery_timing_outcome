@@ -1,5 +1,5 @@
 # Surgery Timing and 30-Day Mortality Outcomes
-
+**Author:** Yanqi Huang
 ## Overview
 
 This project investigates whether the **hour of day a surgery is performed** is associated with **30-day postoperative mortality**, after adjusting for patient demographics, clinical risk factors, comorbidities, and procedure type. The analysis uses logistic regression with restricted cubic splines to flexibly model non-linear relationships.
