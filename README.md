@@ -1,5 +1,5 @@
 # Surgery Timing and 30-Day Mortality Outcomes
-**Author:** Yanqi Huang
+**Author:** Yanqi Huang  
 **Report:** [view analysis report](2025-12-02_report-only_surgery-timing-outcome_yanqi-huang.pdf) 
 
 ## Overview
