@@ -4,7 +4,7 @@
 
 This project investigates whether the **hour of day a surgery is performed** is associated with **30-day postoperative mortality**, after adjusting for patient demographics, clinical risk factors, comorbidities, and procedure type. The analysis uses logistic regression with restricted cubic splines to flexibly model non-linear relationships.
 
-This work was completed as a final project for **BIOS 6618: Advanced Biostatistical Methods** at the University of Colorado.
+**Report:** [view analysis report](2025-12-02_report-only_surgery-timing-outcome_yanqi-huang.pdf) 
 
 ---
 
